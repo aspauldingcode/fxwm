@@ -411,30 +411,8 @@ void UpdateProteinRoot(void) {
 
 __int64 (*_UpdateOld)(__int64 a1, __int64 a2, __int64 a3, __int64 a4);
 __int64 UpdateHook(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        dispatch_source_t timer = dispatch_source_create(
-            DISPATCH_SOURCE_TYPE_TIMER,
-            0,
-            0,
-            dispatch_get_main_queue()
-        );
-
-        dispatch_source_set_timer(
-            timer,
-            dispatch_time(DISPATCH_TIME_NOW, 0),
-            1 * NSEC_PER_SEC, // once per second
-            0
-        );
-
-        dispatch_source_set_event_handler(timer, ^{
-            HideAllWindowsTest();
-            UpdateProteinRoot();
-        });
-
-        dispatch_resume(timer);
-    });
-
+    HideAllWindowsTest();
+    UpdateProteinRoot();
     return _UpdateOld(a1, a2, a3, a4);
 }
 
@@ -462,7 +440,7 @@ void __BootStrapFuncHook(__int64 a1) {
         _RenderSetup();
         setupAlready = true;
     }
-    //_StartSubsidiaryServices(a1);
+    _StartSubsidiaryServices(a1);
 }
 
 __attribute__((constructor))
