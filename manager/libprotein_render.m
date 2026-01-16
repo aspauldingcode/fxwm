@@ -7,6 +7,7 @@
 #include <mach/mach.h>
 #include <pthread.h>
 #include <objc/runtime.h>
+#include <Metal/Metal.h>
 
 
 #define HOOK_INSTANCE_METHOD(CLASS, SELECTOR, REPLACEMENT, ORIGINAL) \
@@ -205,6 +206,14 @@ void *MarkWindows(__int64 a1, unsigned int a2, const void *a3, int a4) {
 void *gWindowRoot = NULL;
 CAContext *gRootContextPtr = NULL;
 
+// Metal rendering objects
+id<MTLDevice> gMetalDevice = nil;
+id<MTLCommandQueue> gMetalCommandQueue = nil;
+id<MTLRenderPipelineState> gMetalPipeline = nil;
+id<MTLBuffer> gMetalVertexBuffer = nil;
+id<MTLBuffer> gMetalIndexBuffer = nil;
+static CAMetalLayer *gMetalSublayer = nil;
+
 void HideAllWindowsTest(void) {
     pthread_mutex_lock(&gWindowListLock);
     WindowNode *curr = gWindowList;
@@ -214,83 +223,143 @@ void HideAllWindowsTest(void) {
     pthread_mutex_unlock(&gWindowListLock);
 }
 
+static void InitializeMetal(void) {
+    if (gMetalDevice) return;
+
+    gMetalDevice = MTLCopyAllDevices()[0];
+    if (!gMetalDevice) {
+        NSLog(@"Failed to create Metal device");
+        return;
+    }
+
+    gMetalCommandQueue = [gMetalDevice newCommandQueue];
+    if (!gMetalCommandQueue) {
+        NSLog(@"Failed to create Metal command queue");
+        return;
+    }
+
+    // Simple vertex shader
+    NSString *vertexShaderSource = @"using namespace metal;\n"
+                                   "struct VertexOut {\n"
+                                   "    float4 position [[position]];\n"
+                                   "    float4 color;\n"
+                                   "};\n"
+                                   "vertex VertexOut vertex_main(uint vid [[vertex_id]]) {\n"
+                                   "    float4 positions[3] = {\n"
+                                   "        float4( 0.0,  0.3, 0.0, 1.0),\n"
+                                   "        float4(-0.3, -0.3, 0.0, 1.0),\n"
+                                   "        float4( 0.3, -0.3, 0.0, 1.0)\n"
+                                   "    };\n"
+                                   "    float4 colors[3] = {\n"
+                                   "        float4(1.0, 1.0, 1.0, 1.0),\n"
+                                   "        float4(1.0, 1.0, 1.0, 1.0),\n"
+                                   "        float4(1.0, 1.0, 1.0, 1.0)\n"
+                                   "    };\n"
+                                   "    VertexOut out;\n"
+                                   "    out.position = positions[vid];\n"
+                                   "    out.color = colors[vid];\n"
+                                   "    return out;\n"
+                                   "}";
+
+    // Simple fragment shader
+    NSString *fragmentShaderSource = @"using namespace metal;\n"
+                                     "struct VertexOut {\n"
+                                     "    float4 position [[position]];\n"
+                                     "    float4 color;\n"
+                                     "};\n"
+                                     "fragment float4 fragment_main(VertexOut in [[stage_in]]) {\n"
+                                     "    return in.color;\n"
+                                     "}";
+
+    // Create vertex shader library
+    NSError *error = nil;
+    id<MTLLibrary> vertexLibrary = [gMetalDevice newLibraryWithSource:vertexShaderSource options:nil error:&error];
+    if (error) {
+        NSLog(@"Failed to create vertex Metal library: %@", error);
+        return;
+    }
+
+    // Create fragment shader library  
+    id<MTLLibrary> fragmentLibrary = [gMetalDevice newLibraryWithSource:fragmentShaderSource options:nil error:&error];
+    if (error) {
+        NSLog(@"Failed to create fragment Metal library: %@", error);
+        return;
+    }
+
+    id<MTLFunction> vertexFunction = [vertexLibrary newFunctionWithName:@"vertex_main"];
+    id<MTLFunction> fragmentFunction = [fragmentLibrary newFunctionWithName:@"fragment_main"];
+
+    NSLog(@"Vertex function: %@", vertexFunction ? @"OK" : @"NULL");
+    NSLog(@"Fragment function: %@", fragmentFunction ? @"OK" : @"NULL");
+
+    // Create render pipeline
+    MTLRenderPipelineDescriptor *pipelineDescriptor = [[MTLRenderPipelineDescriptor alloc] init];
+    pipelineDescriptor.vertexFunction = vertexFunction;
+    pipelineDescriptor.fragmentFunction = fragmentFunction;
+    pipelineDescriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+
+    gMetalPipeline = [gMetalDevice newRenderPipelineStateWithDescriptor:pipelineDescriptor error:&error];
+    if (error) {
+        NSLog(@"Failed to create Metal pipeline: %@", error);
+        return;
+    }
+
+    NSLog(@"Metal initialized successfully with device: %@", gMetalDevice);
+}
+
 static void RenderProteinLogToLayer(CALayer *layer) {
-    const char *path = "/tmp/protein.log";
-    CFStringRef logText = NULL;
-
-    // --- Read file ---
-    CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL,
-                       (const UInt8 *)path, strlen(path), false);
-    CFDataRef data = NULL;
-    if (url &&
-        CFURLCreateDataAndPropertiesFromResource(NULL, url, &data,
-                                                 NULL, NULL, NULL) &&
-        data)
-    {
-        logText = CFStringCreateFromExternalRepresentation(
-            NULL, data, kCFStringEncodingUTF8);
-    }
-    if (url) CFRelease(url);
-    if (data) CFRelease(data);
-    if (!logText) return;
-
-    // --- Create drawing surface same size as layer ---
+    InitializeMetal();
+    
     CGSize size = layer.bounds.size;
-    size_t width  = (size_t)size.width;
-    size_t height = (size_t)size.height;
-
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    CGContextRef ctx = CGBitmapContextCreate(NULL, width, height, 8, 0,
-                                             cs, kCGImageAlphaPremultipliedLast);
-    CGColorSpaceRelease(cs);
-
-    // --- Clear background (white) ---
-    CGContextSetRGBFillColor(ctx, 0, 0, 1, 1);
-    CGContextFillRect(ctx, CGRectMake(0, 0, width, height));
-
-    // --- Configure text drawing ---
-    CGContextSetTextMatrix(ctx, CGAffineTransformMakeScale(1, 1));
-    CGContextSelectFont(ctx, "Menlo", 12, kCGEncodingMacRoman);
-    //CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);
-
-    // --- Convert CFString to UTF8 buffer ---
-    CFIndex len = CFStringGetLength(logText);
-    CFIndex max = CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8) + 1;
-    char *buf = malloc(max);
-    CFStringGetCString(logText, buf, max, kCFStringEncodingUTF8);
-    CFRelease(logText);
-
-    // --- Split into lines from the end so we show newest first ---
-    const char *end = buf + strlen(buf);
-    const char *p = end;
-    CGFloat lineH = 14.0;
-    CGFloat y = height - lineH;
-
-    while (p > buf && y >= 0) {
-        const char *lineEnd = p;
-        while (p > buf && *(p-1) != '\n' && *(p-1) != '\r') p--;
-        size_t lineLen = lineEnd - p;
-
-        if (lineLen > 0) {
-            // --- Draw black highlight behind text line ---
-            CGContextSetRGBFillColor(ctx, 0, 0, 0, 1);  // black background
-            CGContextFillRect(ctx, CGRectMake(0, y, width, lineH - 1));
-
-            // --- Draw white text on top ---
-            CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);  // white text
-            CGContextShowTextAtPoint(ctx, 6, y, p, lineLen);
-        }
-
-        y -= lineH;
-        while (p > buf && (*(p-1) == '\n' || *(p-1) == '\r')) p--;
+    if (size.width <= 0 || size.height <= 0) return;
+    
+    // Create Metal sublayer if it doesn't exist
+    if (!gMetalSublayer) {
+        gMetalSublayer = [[CAMetalLayer alloc] init];
+        gMetalSublayer.device = gMetalDevice;
+        gMetalSublayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        gMetalSublayer.frame = layer.bounds;
+        gMetalSublayer.drawableSize = CGSizeMake(size.width, size.height);
+        gMetalSublayer.opaque = YES;
+        
+        [layer addSublayer:gMetalSublayer];
     }
-    free(buf);
-
-    // --- Commit to layer ---
-    CGImageRef img = CGBitmapContextCreateImage(ctx);
-    CGContextRelease(ctx);
-    layer.contents = (__bridge id)img;
-    CGImageRelease(img);
+    
+    // Update frame if needed
+    if (!CGRectEqualToRect(gMetalSublayer.frame, layer.bounds)) {
+        gMetalSublayer.frame = layer.bounds;
+        gMetalSublayer.drawableSize = CGSizeMake(size.width, size.height);
+    }
+    
+    @autoreleasepool {
+        // Create drawable
+        id<CAMetalDrawable> drawable = [gMetalSublayer nextDrawable];
+        if (!drawable) {
+            NSLog(@"Failed to create Metal drawable");
+            return;
+        }
+        
+        // Create command buffer
+        id<MTLCommandBuffer> commandBuffer = [gMetalCommandQueue commandBuffer];
+        
+        // Create render pass descriptor
+        MTLRenderPassDescriptor *renderPassDescriptor = [[MTLRenderPassDescriptor alloc] init];
+        renderPassDescriptor.colorAttachments[0].texture = drawable.texture;
+        renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
+        renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 1.0);
+        
+        // Begin encoding
+        id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
+        [renderEncoder setViewport:(MTLViewport){0.0, 0.0, size.width, size.height, 0.0, 1.0}];
+        [renderEncoder setRenderPipelineState:gMetalPipeline];
+        [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [renderEncoder endEncoding];
+        
+        // Present and commit
+        [commandBuffer presentDrawable:drawable];
+        [commandBuffer commit];
+    }
 }
 
 void UpdateProteinRoot(void) {
@@ -319,24 +388,22 @@ void UpdateProteinRoot(void) {
 
         OrderWindow(gWindowRoot, 1);
     } else {
-        for (;;) {
-            __int64 intptr = 0;
-            [CATransaction begin];
-            [CATransaction setDisableActions:YES];
-            [CATransaction setDisableSignPosts:YES];
-            [CATransaction setCommittingContexts:gRootContextPtr];
-            __SERVER_COMMIT_START(&intptr, gRootContextPtr);
+        __int64 intptr = 0;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        [CATransaction setDisableSignPosts:YES];
+        [CATransaction setCommittingContexts:gRootContextPtr];
+        __SERVER_COMMIT_START(&intptr, gRootContextPtr);
 
-            gRootContextPtr.layer.backgroundColor = CFAutorelease(CGColorCreateSRGB(0.5, 0, 0, 1.0));
-            RenderProteinLogToLayer(gRootContextPtr.layer);
+        gRootContextPtr.layer.backgroundColor = CGColorCreateSRGB(0.5, 0, 0, 1.0);
+        RenderProteinLogToLayer(gRootContextPtr.layer);
 
-            __SERVER_COMMIT_END(&intptr);
-            [CATransaction commit];
+        __SERVER_COMMIT_END(&intptr);
+        [CATransaction commit];
 
-            _InvalidateDisplayShape(0LL, (__int64)gWindowRoot, (__int64)Region);
-            _ScheduleUpdateAllDisplays(0LL, 0LL);
-            OrderWindow(gWindowRoot, 1);
-        }
+        _InvalidateDisplayShape(0LL, (__int64)gWindowRoot, (__int64)Region);
+        _ScheduleUpdateAllDisplays(0LL, 0LL);
+        OrderWindow(gWindowRoot, 1);
     }
 }
 

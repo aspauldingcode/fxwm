@@ -74,6 +74,7 @@
             -I${dobbyArm64e}/include \
             -L${dobbyArm64e}/lib -ldobby \
             -framework Foundation -framework IOSurface -framework CoreGraphics -framework QuartzCore \
+            -framework Metal \
             -lc++ \
             libprotein_render.m sym.c
         '';
