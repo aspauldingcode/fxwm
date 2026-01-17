@@ -33,6 +33,41 @@ static id<MTLTexture> gDepthTexture = nil;
 static CAMetalLayer *gMetalSublayer = nil;
 static CFTimeInterval gAnimationStartTime = 0;
 
+// Mouse interaction state
+static CGPoint gMousePosition = {0, 0};
+static bool gMouseIsDown = false;
+static float gManualRotationX = 0.0f;
+static float gManualRotationY = 0.0f;
+static CGPoint gMouseDownPosition = {0, 0};
+static float gRotationAtMouseDownX = 0.0f;
+static float gRotationAtMouseDownY = 0.0f;
+
+void MetalRendererSetMousePosition(CGPoint position) {
+    gMousePosition = position;
+
+    if (gMouseIsDown) {
+        // Calculate rotation delta based on mouse drag
+        float deltaX = position.x - gMouseDownPosition.x;
+        float deltaY = position.y - gMouseDownPosition.y;
+
+        gManualRotationY = gRotationAtMouseDownY + deltaX * 0.01f;
+        gManualRotationX = gRotationAtMouseDownX + deltaY * 0.01f;
+    }
+}
+
+void MetalRendererSetMouseDown(bool isDown) {
+    if (isDown && !gMouseIsDown) {
+        // Mouse just pressed - save current state
+        gMouseDownPosition = gMousePosition;
+        gRotationAtMouseDownX = gManualRotationX;
+        gRotationAtMouseDownY = gManualRotationY;
+        NSLog(@"[Metal] Mouse down at %.0f, %.0f", gMousePosition.x, gMousePosition.y);
+    } else if (!isDown && gMouseIsDown) {
+        NSLog(@"[Metal] Mouse up at %.0f, %.0f", gMousePosition.x, gMousePosition.y);
+    }
+    gMouseIsDown = isDown;
+}
+
 // Matrix math helpers (column-major for Metal)
 // Column-major: element at row r, col c is at index c*4+r
 static void matrix_multiply(float *result, const float *a, const float *b) {
@@ -269,10 +304,16 @@ void MetalRendererDrawToLayer(CALayer *layer) {
             return;
         }
 
-        // Calculate animation time
-        CFTimeInterval time = CACurrentMediaTime() - gAnimationStartTime;
-        float rotationY = time * 1.0f; // Rotate around Y axis
-        float rotationX = time * 0.7f; // Rotate around X axis
+        // Calculate rotation - use manual rotation if mouse is down, otherwise animate
+        float rotationY, rotationX;
+        if (gMouseIsDown) {
+            rotationY = gManualRotationY;
+            rotationX = gManualRotationX;
+        } else {
+            CFTimeInterval time = CACurrentMediaTime() - gAnimationStartTime;
+            rotationY = gManualRotationY + time * 0.5f; // Slower auto-rotation
+            rotationX = gManualRotationX + time * 0.3f;
+        }
 
         // Build model-view-projection matrix
         float rotY[16], rotX[16], rot[16], trans[16], model[16], proj[16], mvp[16];
