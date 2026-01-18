@@ -7,12 +7,12 @@
 
 #import <QuartzCore/QuartzCore.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import "ui.h"
 
-void MetalRendererInit(void);
-void MetalRendererDrawToLayer(CALayer *layer);
+// Renders the view hierarchy starting from rootView into the layer
+void MetalRendererRender(PVView *rootView, CALayer *layer);
 
-// Mouse interaction - updates cube rotation based on mouse
-void MetalRendererSetMousePosition(CGPoint position);
-void MetalRendererSetMouseDown(bool isDown);
+// Updates view state based on mouse interaction (hover, click)
+void MetalRendererHandleMouse(PVView *rootView, CGPoint position, bool isDown);
 
 #endif /* metal_renderer_h */

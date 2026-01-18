@@ -175,37 +175,6 @@ static void ProcessMouseEvent(SLSEventRecord *event) {
 }
 
 // ============================================================================
-// MARK: - Default Mouse Handler (connects to Metal renderer)
-// ============================================================================
-
-static void DefaultMouseEventHandler(
-    CGSEventType eventType,
-    CGPoint screenLocation,
-    CGPoint windowLocation,
-    int buttonNumber,
-    int clickCount,
-    void *userInfo) 
-{
-    // Update metal renderer with mouse position
-    MetalRendererSetMousePosition(windowLocation);
-
-    // Handle mouse down/up for dragging
-    switch (eventType) {
-        case kCGSEventLeftMouseDown:
-            MetalRendererSetMouseDown(true);
-            break;
-        case kCGSEventLeftMouseUp:
-            MetalRendererSetMouseDown(false);
-            break;
-        case kCGSEventLeftMouseDragged:
-            // Position already updated above
-            break;
-        default:
-            break;
-    }
-}
-
-// ============================================================================
 // MARK: - Mouse Event Hook
 // ============================================================================
 
@@ -228,8 +197,4 @@ void SetupMouseEvents(void) {
     );
 
     NSLog(@"[Protein] Mouse event hook installed");
-    
-    // Register default mouse handler for Metal renderer interaction
-    ProteinSetMouseEventCallback(DefaultMouseEventHandler, NULL);
-    NSLog(@"[Protein] Default mouse handler registered");
 }

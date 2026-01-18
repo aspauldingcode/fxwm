@@ -221,10 +221,15 @@ void *MarkWindows(__int64 a1, unsigned int a2, const void *a3, int a4) {
     return w;
 }
 
+#import "ui.h"
+
 // Global (non-static) for access by mouse_events.m
 void *gWindowRoot = NULL;
 CAContext *gRootContextPtr = NULL;
 CGRect gWindowRootBounds = {0, 0, 1800, 1169};
+
+// Root of our view hierarchy
+static PVView *gRootView = nil;
 
 // ============================================================================ 
 // MARK: - Mouse Event Public API (Removed - Moved to mouse_events.m)
@@ -245,6 +250,48 @@ void HideAllWindowsTest(void) {
         curr = curr->next;
     }
     pthread_mutex_unlock(&gWindowListLock);
+}
+
+// Mouse handler for Protein UI
+static void ProteinMouseHandler(
+    CGSEventType eventType,
+    CGPoint screenLocation,
+    CGPoint windowLocation,
+    int buttonNumber,
+    int clickCount,
+    void *userInfo)
+{
+    if (!gRootView) return;
+
+    bool isDown = false;
+    switch (eventType) {
+        case kCGSEventLeftMouseDown:
+        case kCGSEventRightMouseDown:
+        case kCGSEventOtherMouseDown:
+            isDown = true;
+            break;
+        case kCGSEventLeftMouseUp:
+        case kCGSEventRightMouseUp:
+        case kCGSEventOtherMouseUp:
+            isDown = false;
+            break;
+        case kCGSEventLeftMouseDragged:
+        case kCGSEventRightMouseDragged:
+        case kCGSEventOtherMouseDragged:
+            // Dragged implies down usually, but we might want to check button state
+            // For simplicity, let's assume if we are dragging, it's down.
+            // But we only get "isDown" passed as a bool to renderer.
+            // Renderer logic: hover && down -> pressed.
+            // If we are dragging, we are down.
+            isDown = true; 
+            break;
+        default:
+            // MouseMoved
+            isDown = false;
+            break;
+    }
+
+    MetalRendererHandleMouse(gRootView, windowLocation, isDown);
 }
 
 void UpdateProteinRoot(void) {
@@ -277,7 +324,6 @@ void UpdateProteinRoot(void) {
               gWindowRootBounds.origin.x, gWindowRootBounds.origin.y,
               gWindowRootBounds.size.width, gWindowRootBounds.size.height);
         
-        // Mouse handler is now registered in SetupMouseEvents() called during setup
     } else {
         __int64 intptr = 0;
         [CATransaction begin];
@@ -287,7 +333,11 @@ void UpdateProteinRoot(void) {
         __SERVER_COMMIT_START(&intptr, gRootContextPtr);
 
         gRootContextPtr.layer.backgroundColor = CGColorCreateSRGB(0.5, 0, 0, 1.0);
-        MetalRendererDrawToLayer(gRootContextPtr.layer);
+        
+        // Render the view hierarchy
+        if (gRootView) {
+            MetalRendererRender(gRootView, gRootContextPtr.layer);
+        }
 
         __SERVER_COMMIT_END(&intptr);
         [CATransaction commit];
@@ -344,6 +394,30 @@ void _RenderSetup(void) {
 
     // Initialize mouse event handling
     SetupMouseEvents();
+    ProteinSetMouseEventCallback(ProteinMouseHandler, NULL);
+    
+    // Setup View Hierarchy
+    gRootView = [[PVView alloc] init];
+    gRootView.frame = CGRectMake(0, 0, 1800, 1169); // Match window bounds for now
+    CGColorRef bg = CGColorCreateSRGB(0.1, 0.1, 0.1, 1.0);
+    gRootView.backgroundColor = bg;
+    if (bg) CGColorRelease(bg);
+
+    // Add a button
+    PVButton *btn = [[PVButton alloc] init];
+    btn.frame = CGRectMake(800, 500, 200, 60); // Centered-ish
+    CGColorRef btnBg = CGColorCreateSRGB(0.2, 0.6, 1.0, 1.0);
+    btn.backgroundColor = btnBg;
+    if (btnBg) CGColorRelease(btnBg);
+    [gRootView addSubview:btn];
+    
+    // Add another view
+    PVView *box = [[PVView alloc] init];
+    box.frame = CGRectMake(100, 100, 100, 100);
+    CGColorRef boxBg = CGColorCreateSRGB(0.8, 0.2, 0.2, 1.0);
+    box.backgroundColor = boxBg;
+    if (boxBg) CGColorRelease(boxBg);
+    [gRootView addSubview:box];
 }
 
 Boolean setupAlready = false;
