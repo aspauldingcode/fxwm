@@ -10,15 +10,17 @@
 
 #import "metal_renderer.h"
 
-// Cube vertex structure
+// Simple vertex structure
 typedef struct {
-    float position[3];
-    float color[3];
-} CubeVertex;
+    float position[2]; // 2D position
+    float color[4];    // RGBA color
+} Vertex;
 
-// Uniforms for animation
+// Uniforms for rendering
 typedef struct {
-    float modelViewProjection[16];
+    float scale[2];     // Scale factor for aspect ratio correction
+    float offset[2];    // Position offset
+    float colorMod[4];  // Color modifier (for hover/click)
 } Uniforms;
 
 // Metal rendering objects
@@ -26,100 +28,23 @@ static id<MTLDevice> gMetalDevice = nil;
 static id<MTLCommandQueue> gMetalCommandQueue = nil;
 static id<MTLRenderPipelineState> gMetalPipeline = nil;
 static id<MTLBuffer> gMetalVertexBuffer = nil;
-static id<MTLBuffer> gMetalIndexBuffer = nil;
 static id<MTLBuffer> gMetalUniformBuffer = nil;
-static id<MTLDepthStencilState> gMetalDepthState = nil;
-static id<MTLTexture> gDepthTexture = nil;
 static CAMetalLayer *gMetalSublayer = nil;
-static CFTimeInterval gAnimationStartTime = 0;
 
 // Mouse interaction state
 static CGPoint gMousePosition = {0, 0};
 static bool gMouseIsDown = false;
-static float gManualRotationX = 0.0f;
-static float gManualRotationY = 0.0f;
-static CGPoint gMouseDownPosition = {0, 0};
-static float gRotationAtMouseDownX = 0.0f;
-static float gRotationAtMouseDownY = 0.0f;
+static bool gIsHovering = false;
+
+// Button properties
+static const CGSize kButtonSize = {200.0f, 60.0f};
 
 void MetalRendererSetMousePosition(CGPoint position) {
     gMousePosition = position;
-
-    if (gMouseIsDown) {
-        // Calculate rotation delta based on mouse drag
-        float deltaX = position.x - gMouseDownPosition.x;
-        float deltaY = position.y - gMouseDownPosition.y;
-
-        gManualRotationY = gRotationAtMouseDownY + deltaX * 0.01f;
-        gManualRotationX = gRotationAtMouseDownX + deltaY * 0.01f;
-    }
 }
 
 void MetalRendererSetMouseDown(bool isDown) {
-    if (isDown && !gMouseIsDown) {
-        // Mouse just pressed - save current state
-        gMouseDownPosition = gMousePosition;
-        gRotationAtMouseDownX = gManualRotationX;
-        gRotationAtMouseDownY = gManualRotationY;
-        NSLog(@"[Metal] Mouse down at %.0f, %.0f", gMousePosition.x, gMousePosition.y);
-    } else if (!isDown && gMouseIsDown) {
-        NSLog(@"[Metal] Mouse up at %.0f, %.0f", gMousePosition.x, gMousePosition.y);
-    }
     gMouseIsDown = isDown;
-}
-
-// Matrix math helpers (column-major for Metal)
-// Column-major: element at row r, col c is at index c*4+r
-static void matrix_multiply(float *result, const float *a, const float *b) {
-    float temp[16];
-    for (int c = 0; c < 4; c++) {
-        for (int r = 0; r < 4; r++) {
-            temp[c * 4 + r] = 0;
-            for (int k = 0; k < 4; k++) {
-                temp[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k];
-            }
-        }
-    }
-    memcpy(result, temp, sizeof(temp));
-}
-
-static void matrix_identity(float *m) {
-    memset(m, 0, 16 * sizeof(float));
-    m[0] = m[5] = m[10] = m[15] = 1.0f;
-}
-
-static void matrix_rotation_y(float *m, float angle) {
-    matrix_identity(m);
-    float c = cosf(angle);
-    float s = sinf(angle);
-    // Column-major Y rotation
-    m[0] = c;   m[2] = -s;
-    m[8] = s;   m[10] = c;
-}
-
-static void matrix_rotation_x(float *m, float angle) {
-    matrix_identity(m);
-    float c = cosf(angle);
-    float s = sinf(angle);
-    // Column-major X rotation
-    m[5] = c;   m[6] = s;
-    m[9] = -s;  m[10] = c;
-}
-
-static void matrix_translation(float *m, float x, float y, float z) {
-    matrix_identity(m);
-    // Column-major: translation in column 3
-    m[12] = x; m[13] = y; m[14] = z;
-}
-
-static void matrix_perspective(float *m, float fov, float aspect, float near, float far) {
-    memset(m, 0, 16 * sizeof(float));
-    float f = 1.0f / tanf(fov / 2.0f);
-    m[0] = f / aspect;
-    m[5] = f;
-    m[10] = far / (near - far);
-    m[11] = -1.0f;
-    m[14] = (far * near) / (near - far);
 }
 
 void MetalRendererInit(void) {
@@ -137,28 +62,30 @@ void MetalRendererInit(void) {
         return;
     }
 
-    // Cube shader with 3D transforms
+    // 2D Shader
     NSString *shaderSource = @"using namespace metal;\n"
         "struct VertexIn {\n"
-        "    float3 position [[attribute(0)]];\n"
-        "    float3 color [[attribute(1)]];\n"
+        "    float2 position [[attribute(0)]];\n"
+        "    float4 color [[attribute(1)]];\n"
         "};\n"
         "struct VertexOut {\n"
         "    float4 position [[position]];\n"
-        "    float3 color;\n"
+        "    float4 color;\n"
         "};\n"
         "struct Uniforms {\n"
-        "    float4x4 modelViewProjection;\n"
+        "    float2 scale;\n"
+        "    float2 offset;\n"
+        "    float4 colorMod;\n"
         "};\n"
         "vertex VertexOut vertex_main(VertexIn in [[stage_in]],\n"
         "                             constant Uniforms &uniforms [[buffer(1)]]) {\n"
         "    VertexOut out;\n"
-        "    out.position = uniforms.modelViewProjection * float4(in.position, 1.0);\n"
-        "    out.color = in.color;\n"
+        "    out.position = float4(in.position * uniforms.scale + uniforms.offset, 0.0, 1.0);\n"
+        "    out.color = in.color * uniforms.colorMod;\n"
         "    return out;\n"
         "}\n"
         "fragment float4 fragment_main(VertexOut in [[stage_in]]) {\n"
-        "    return float4(in.color, 1.0);\n"
+        "    return in.color;\n"
         "}";
 
     NSError *error = nil;
@@ -171,69 +98,35 @@ void MetalRendererInit(void) {
     id<MTLFunction> vertexFunction = [library newFunctionWithName:@"vertex_main"];
     id<MTLFunction> fragmentFunction = [library newFunctionWithName:@"fragment_main"];
 
-    // Define cube vertices with colors per face
-    // 8 corners, but we need 24 vertices (4 per face) for proper face colors
-    CubeVertex vertices[] = {
-        // Front face (red)
-        {{-0.5, -0.5,  0.5}, {1.0, 0.2, 0.2}},
-        {{ 0.5, -0.5,  0.5}, {1.0, 0.2, 0.2}},
-        {{ 0.5,  0.5,  0.5}, {1.0, 0.2, 0.2}},
-        {{-0.5,  0.5,  0.5}, {1.0, 0.2, 0.2}},
-        // Back face (green)
-        {{ 0.5, -0.5, -0.5}, {0.2, 1.0, 0.2}},
-        {{-0.5, -0.5, -0.5}, {0.2, 1.0, 0.2}},
-        {{-0.5,  0.5, -0.5}, {0.2, 1.0, 0.2}},
-        {{ 0.5,  0.5, -0.5}, {0.2, 1.0, 0.2}},
-        // Top face (blue)
-        {{-0.5,  0.5,  0.5}, {0.2, 0.2, 1.0}},
-        {{ 0.5,  0.5,  0.5}, {0.2, 0.2, 1.0}},
-        {{ 0.5,  0.5, -0.5}, {0.2, 0.2, 1.0}},
-        {{-0.5,  0.5, -0.5}, {0.2, 0.2, 1.0}},
-        // Bottom face (yellow)
-        {{-0.5, -0.5, -0.5}, {1.0, 1.0, 0.2}},
-        {{ 0.5, -0.5, -0.5}, {1.0, 1.0, 0.2}},
-        {{ 0.5, -0.5,  0.5}, {1.0, 1.0, 0.2}},
-        {{-0.5, -0.5,  0.5}, {1.0, 1.0, 0.2}},
-        // Right face (magenta)
-        {{ 0.5, -0.5,  0.5}, {1.0, 0.2, 1.0}},
-        {{ 0.5, -0.5, -0.5}, {1.0, 0.2, 1.0}},
-        {{ 0.5,  0.5, -0.5}, {1.0, 0.2, 1.0}},
-        {{ 0.5,  0.5,  0.5}, {1.0, 0.2, 1.0}},
-        // Left face (cyan)
-        {{-0.5, -0.5, -0.5}, {0.2, 1.0, 1.0}},
-        {{-0.5, -0.5,  0.5}, {0.2, 1.0, 1.0}},
-        {{-0.5,  0.5,  0.5}, {0.2, 1.0, 1.0}},
-        {{-0.5,  0.5, -0.5}, {0.2, 1.0, 1.0}},
-    };
-
-    // Index buffer for cube faces (2 triangles per face, 6 faces)
-    uint16_t indices[] = {
-        0,  1,  2,  0,  2,  3,   // front
-        4,  5,  6,  4,  6,  7,   // back
-        8,  9,  10, 8,  10, 11,  // top
-        12, 13, 14, 12, 14, 15,  // bottom
-        16, 17, 18, 16, 18, 19,  // right
-        20, 21, 22, 20, 22, 23,  // left
+    // Define a simple quad (2 triangles) centered at 0,0 with size 2x2 (-1 to 1)
+    // We will scale it down in the vertex shader
+    Vertex vertices[] = {
+        // Triangle 1
+        {{-1.0f, -1.0f}, {0.2f, 0.6f, 1.0f, 1.0f}}, // Bottom-Left
+        {{ 1.0f, -1.0f}, {0.2f, 0.6f, 1.0f, 1.0f}}, // Bottom-Right
+        {{-1.0f,  1.0f}, {0.4f, 0.8f, 1.0f, 1.0f}}, // Top-Left
+        // Triangle 2
+        {{ 1.0f, -1.0f}, {0.2f, 0.6f, 1.0f, 1.0f}}, // Bottom-Right
+        {{ 1.0f,  1.0f}, {0.4f, 0.8f, 1.0f, 1.0f}}, // Top-Right
+        {{-1.0f,  1.0f}, {0.4f, 0.8f, 1.0f, 1.0f}}, // Top-Left
     };
 
     gMetalVertexBuffer = [gMetalDevice newBufferWithBytes:vertices
                                                    length:sizeof(vertices)
                                                   options:MTLResourceStorageModeShared];
-    gMetalIndexBuffer = [gMetalDevice newBufferWithBytes:indices
-                                                  length:sizeof(indices)
-                                                 options:MTLResourceStorageModeShared];
+
     gMetalUniformBuffer = [gMetalDevice newBufferWithLength:sizeof(Uniforms)
                                                     options:MTLResourceStorageModeShared];
 
     // Vertex descriptor
     MTLVertexDescriptor *vertexDescriptor = [[MTLVertexDescriptor alloc] init];
-    vertexDescriptor.attributes[0].format = MTLVertexFormatFloat3;
-    vertexDescriptor.attributes[0].offset = offsetof(CubeVertex, position);
+    vertexDescriptor.attributes[0].format = MTLVertexFormatFloat2;
+    vertexDescriptor.attributes[0].offset = offsetof(Vertex, position);
     vertexDescriptor.attributes[0].bufferIndex = 0;
-    vertexDescriptor.attributes[1].format = MTLVertexFormatFloat3;
-    vertexDescriptor.attributes[1].offset = offsetof(CubeVertex, color);
+    vertexDescriptor.attributes[1].format = MTLVertexFormatFloat4;
+    vertexDescriptor.attributes[1].offset = offsetof(Vertex, color);
     vertexDescriptor.attributes[1].bufferIndex = 0;
-    vertexDescriptor.layouts[0].stride = sizeof(CubeVertex);
+    vertexDescriptor.layouts[0].stride = sizeof(Vertex);
     vertexDescriptor.layouts[0].stepFunction = MTLVertexStepFunctionPerVertex;
 
     // Create render pipeline
@@ -242,7 +135,11 @@ void MetalRendererInit(void) {
     pipelineDescriptor.fragmentFunction = fragmentFunction;
     pipelineDescriptor.vertexDescriptor = vertexDescriptor;
     pipelineDescriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
-    pipelineDescriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    // Blending for rounded corners/transparency if we wanted (keeping it simple for now)
+    pipelineDescriptor.colorAttachments[0].blendingEnabled = YES;
+    pipelineDescriptor.colorAttachments[0].rgbBlendOperation = MTLBlendOperationAdd;
+    pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+    pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
 
     gMetalPipeline = [gMetalDevice newRenderPipelineStateWithDescriptor:pipelineDescriptor error:&error];
     if (error) {
@@ -250,14 +147,7 @@ void MetalRendererInit(void) {
         return;
     }
 
-    // Create depth stencil state
-    MTLDepthStencilDescriptor *depthDescriptor = [[MTLDepthStencilDescriptor alloc] init];
-    depthDescriptor.depthCompareFunction = MTLCompareFunctionLess;
-    depthDescriptor.depthWriteEnabled = YES;
-    gMetalDepthState = [gMetalDevice newDepthStencilStateWithDescriptor:depthDescriptor];
-
-    gAnimationStartTime = CACurrentMediaTime();
-    NSLog(@"Metal initialized successfully with device: %@", gMetalDevice);
+    NSLog(@"Metal 2D Button Renderer initialized");
 }
 
 void MetalRendererDrawToLayer(CALayer *layer) {
@@ -273,7 +163,8 @@ void MetalRendererDrawToLayer(CALayer *layer) {
         gMetalSublayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
         gMetalSublayer.frame = layer.bounds;
         gMetalSublayer.drawableSize = CGSizeMake(size.width, size.height);
-        gMetalSublayer.opaque = YES;
+        gMetalSublayer.opaque = NO; // Allow transparency behind button
+        gMetalSublayer.backgroundColor = CGColorGetConstantColor(kCGColorClear);
 
         [layer addSublayer:gMetalSublayer];
     }
@@ -282,18 +173,6 @@ void MetalRendererDrawToLayer(CALayer *layer) {
     if (!CGRectEqualToRect(gMetalSublayer.frame, layer.bounds)) {
         gMetalSublayer.frame = layer.bounds;
         gMetalSublayer.drawableSize = CGSizeMake(size.width, size.height);
-        gDepthTexture = nil; // Force recreation
-    }
-
-    // Create or recreate depth texture if needed
-    if (!gDepthTexture || gDepthTexture.width != (NSUInteger)size.width || gDepthTexture.height != (NSUInteger)size.height) {
-        MTLTextureDescriptor *depthDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
-                                                                                            width:(NSUInteger)size.width
-                                                                                           height:(NSUInteger)size.height
-                                                                                        mipmapped:NO];
-        depthDesc.usage = MTLTextureUsageRenderTarget;
-        depthDesc.storageMode = MTLStorageModePrivate;
-        gDepthTexture = [gMetalDevice newTextureWithDescriptor:depthDesc];
     }
 
     @autoreleasepool {
@@ -304,35 +183,51 @@ void MetalRendererDrawToLayer(CALayer *layer) {
             return;
         }
 
-        // Calculate rotation - use manual rotation if mouse is down, otherwise animate
-        float rotationY, rotationX;
-        if (gMouseIsDown) {
-            rotationY = gManualRotationY;
-            rotationX = gManualRotationX;
-        } else {
-            CFTimeInterval time = CACurrentMediaTime() - gAnimationStartTime;
-            rotationY = gManualRotationY + time * 0.5f; // Slower auto-rotation
-            rotationX = gManualRotationX + time * 0.3f;
-        }
+        // Logic to check if mouse is over the button
+        // Button is centered.
+        CGRect buttonRect = CGRectMake((size.width - kButtonSize.width) / 2.0,
+                                     (size.height - kButtonSize.height) / 2.0,
+                                     kButtonSize.width,
+                                     kButtonSize.height);
 
-        // Build model-view-projection matrix
-        float rotY[16], rotX[16], rot[16], trans[16], model[16], proj[16], mvp[16];
+        // Check hit test (simple AABB)
+        gIsHovering = CGRectContainsPoint(buttonRect, gMousePosition);
 
-        matrix_rotation_y(rotY, rotationY);
-        matrix_rotation_x(rotX, rotationX);
-        matrix_multiply(rot, rotX, rotY);
-
-        matrix_translation(trans, 0.0f, 0.0f, -3.0f);
-        matrix_multiply(model, trans, rot);
-
-        float aspect = size.width / size.height;
-        matrix_perspective(proj, M_PI / 4.0f, aspect, 0.1f, 100.0f);
-
-        matrix_multiply(mvp, proj, model);
-
-        // Update uniform buffer
+        // Update Uniforms
         Uniforms *uniforms = (Uniforms *)[gMetalUniformBuffer contents];
-        memcpy(uniforms->modelViewProjection, mvp, sizeof(mvp));
+        
+        // Scale: Convert pixels to NDC size
+        // Button size in pixels -> NDC (-1 to 1)
+        // NDC width = buttonWidth / screenWidth * 2
+        uniforms->scale[0] = (kButtonSize.width / size.width);
+        uniforms->scale[1] = (kButtonSize.height / size.height);
+        
+        // Offset: 0,0 is center
+        uniforms->offset[0] = 0.0f;
+        uniforms->offset[1] = 0.0f;
+
+        // Color interaction
+        if (gIsHovering) {
+            if (gMouseIsDown) {
+                // Clicked: Darker
+                uniforms->colorMod[0] = 0.6f;
+                uniforms->colorMod[1] = 0.6f;
+                uniforms->colorMod[2] = 0.6f;
+                uniforms->colorMod[3] = 1.0f;
+            } else {
+                // Hover: Brighter
+                uniforms->colorMod[0] = 1.2f;
+                uniforms->colorMod[1] = 1.2f;
+                uniforms->colorMod[2] = 1.2f;
+                uniforms->colorMod[3] = 1.0f;
+            }
+        } else {
+            // Normal
+            uniforms->colorMod[0] = 1.0f;
+            uniforms->colorMod[1] = 1.0f;
+            uniforms->colorMod[2] = 1.0f;
+            uniforms->colorMod[3] = 1.0f;
+        }
 
         // Create command buffer
         id<MTLCommandBuffer> commandBuffer = [gMetalCommandQueue commandBuffer];
@@ -342,29 +237,18 @@ void MetalRendererDrawToLayer(CALayer *layer) {
         renderPassDescriptor.colorAttachments[0].texture = drawable.texture;
         renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
         renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
-        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.05, 0.05, 0.1, 1.0);
-
-        renderPassDescriptor.depthAttachment.texture = gDepthTexture;
-        renderPassDescriptor.depthAttachment.loadAction = MTLLoadActionClear;
-        renderPassDescriptor.depthAttachment.storeAction = MTLStoreActionDontCare;
-        renderPassDescriptor.depthAttachment.clearDepth = 1.0;
+        // Transparent background clear color
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
 
         // Begin encoding
         id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
         [renderEncoder setViewport:(MTLViewport){0.0, 0.0, size.width, size.height, 0.0, 1.0}];
         [renderEncoder setRenderPipelineState:gMetalPipeline];
-        [renderEncoder setDepthStencilState:gMetalDepthState];
-        [renderEncoder setCullMode:MTLCullModeBack];
-        [renderEncoder setFrontFacingWinding:MTLWindingClockwise];
 
         [renderEncoder setVertexBuffer:gMetalVertexBuffer offset:0 atIndex:0];
         [renderEncoder setVertexBuffer:gMetalUniformBuffer offset:0 atIndex:1];
 
-        [renderEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
-                                  indexCount:36
-                                   indexType:MTLIndexTypeUInt16
-                                 indexBuffer:gMetalIndexBuffer
-                           indexBufferOffset:0];
+        [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
         [renderEncoder endEncoding];
 
         // Present and commit
