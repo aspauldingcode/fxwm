@@ -50,6 +50,7 @@
     NSString *_placeholder;
     uint32_t _textColor;
     BOOL _isFocused;
+    BOOL _secureTextEntry;
     void (^_onEnter)(NSString *text);
 }
 
@@ -57,6 +58,7 @@
 @property (nonatomic, copy) NSString *placeholder;
 @property (nonatomic, assign) uint32_t textColor;
 @property (nonatomic, assign) BOOL isFocused;
+@property (nonatomic, assign) BOOL secureTextEntry;
 @property (nonatomic, copy) void (^onEnter)(NSString *text);
 
 - (void)handleKeyDown:(uint16_t)keyCode character:(char)character;

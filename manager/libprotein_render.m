@@ -232,7 +232,7 @@ CGRect gWindowRootBounds = {0, 0, 1800, 1169};
 // Root of our view hierarchy
 PVView *gRootView = nil; // Removed static
 
-// ============================================================================ 
+// ============================================================================
 // MARK: - Mouse Event Public API (Removed - Moved to mouse_events.m)
 // ============================================================================
 
@@ -384,6 +384,9 @@ Boolean NeedsUpdateTrue(id self, SEL _cmd) {
     return true;
 }
 
+extern
+void CreateLogonView(PVView *gRootView);
+
 char * LibName;
 void _RenderSetup(void) {
     // madman hooks
@@ -397,43 +400,47 @@ void _RenderSetup(void) {
     SetupMouseEvents();
     ProteinSetMouseEventCallback(ProteinMouseHandler, NULL);
     SetupKeyboardEvents();
-    
+
     // Setup View Hierarchy
     gRootView = [[PVView alloc] init];
     gRootView.frame = CGRectMake(0, 0, 1800, 1169); // Match window bounds for now
     gRootView.backgroundColor = 0x1A1A1AFF; // Dark grey
 
-    // Add a button
-    PVButton *btn = [[PVButton alloc] init];
-    btn.frame = CGRectMake(800, 500, 200, 60); // Centered-ish
-    btn.title = @"Click Me";
-    btn.backgroundColor = 0x3399FFFF; // Light blue
-    [gRootView addSubview:btn];
-    
-    // Add another view
-    PVView *box = [[PVView alloc] init];
-    box.frame = CGRectMake(100, 100, 100, 100);
-    box.backgroundColor = 0xCC3333FF; // Red-ish
-    [gRootView addSubview:box];
-    
-    // Add a label
-    PVLabel *lbl = [[PVLabel alloc] init];
-    lbl.frame = CGRectMake(100, 220, 200, 30);
-    lbl.text = @"Hello Label";
-    lbl.textColor = 0xFF00FFFF; // Magenta
-    [gRootView addSubview:lbl];
 
-    // Add a text field
-    PVTextField *tf = [[PVTextField alloc] init];
-    tf.frame = CGRectMake(800, 600, 200, 40);
-    tf.placeholder = @"Type here...";
-    tf.textColor = 0xFFFFFFFF;
-    tf.backgroundColor = 0x555555FF;
-    tf.onEnter = ^(NSString *text) {
-        NSLog(@"[Protein] Text Entered: %@", text);
-        lbl.text = [NSString stringWithFormat:@"Entered: %@", text];
-    };
-    [gRootView addSubview:tf];
+    // call create logon shits
+    CreateLogonView(gRootView);
+
+    // // Add a button
+    // PVButton *btn = [[PVButton alloc] init];
+    // btn.frame = CGRectMake(800, 500, 200, 60); // Centered-ish
+    // btn.title = @"Click Me";
+    // btn.backgroundColor = 0x3399FFFF; // Light blue
+    // [gRootView addSubview:btn];
+
+    // // Add another view
+    // PVView *box = [[PVView alloc] init];
+    // box.frame = CGRectMake(100, 100, 100, 100);
+    // box.backgroundColor = 0xCC3333FF; // Red-ish
+    // [gRootView addSubview:box];
+
+    // // Add a label
+    // PVLabel *lbl = [[PVLabel alloc] init];
+    // lbl.frame = CGRectMake(100, 220, 200, 30);
+    // lbl.text = @"Hello Label";
+    // lbl.textColor = 0xFF00FFFF; // Magenta
+    // [gRootView addSubview:lbl];
+
+    // // Add a text field
+    // PVTextField *tf = [[PVTextField alloc] init];
+    // tf.frame = CGRectMake(800, 600, 200, 40);
+    // tf.placeholder = @"Type here...";
+    // tf.textColor = 0xFFFFFFFF;
+    // tf.backgroundColor = 0x555555FF;
+    // tf.onEnter = ^(NSString *text) {
+    //     NSLog(@"[Protein] Text Entered: %@", text);
+    //     lbl.text = [NSString stringWithFormat:@"Entered: %@", text];
+    // };
+    // [gRootView addSubview:tf];
 }
 
 Boolean setupAlready = false;

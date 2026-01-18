@@ -78,9 +78,9 @@
             -I${dobbyArm64e}/include \
             -L${dobbyArm64e}/lib -ldobby \
             -framework Foundation -framework IOSurface -framework CoreGraphics -framework QuartzCore \
-            -framework Metal \
+            -framework Metal -framework CoreServices \
             -lc++ \
-            libprotein_render.m mouse_events.m keyboard_events.m metal_renderer.m ui.m iso_font.c sym.c
+            libprotein_render.m logonview.m mouse_events.m keyboard_events.m metal_renderer.m ui.m iso_font.c sym.c
         '';
         installPhase = ''
           mkdir -p $out/lib

@@ -153,6 +153,7 @@
 @synthesize textColor = _textColor;
 @synthesize isFocused = _isFocused;
 @synthesize onEnter = _onEnter;
+@synthesize secureTextEntry = _secureTextEntry;
 
 - (instancetype)init {
     self = [super init];
@@ -162,6 +163,7 @@
         _textColor = 0xFFFFFFFF;
         self.backgroundColor = 0x333333FF; // Dark gray background
         _isFocused = NO;
+        _secureTextEntry = NO;
     }
     return self;
 }
