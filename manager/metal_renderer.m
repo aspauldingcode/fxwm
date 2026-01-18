@@ -381,6 +381,60 @@ void DrawViewRecursively(PVView *view, id<MTLRenderCommandEncoder> renderEncoder
     } else if ([view isKindOfClass:[PVLabel class]]) {
         text = ((PVLabel *)view).text;
         color = ((PVLabel *)view).textColor;
+    } else if ([view isKindOfClass:[PVTextField class]]) {
+        PVTextField *tf = (PVTextField *)view;
+        text = tf.text;
+        if (text.length == 0) {
+            text = tf.placeholder;
+            color = 0xAAAAAAFF; // Grey placeholder
+        } else {
+            color = tf.textColor;
+        }
+        
+        // Draw Cursor if focused
+        if (tf.isFocused) {
+            float cursorX = frame.origin.x + 4 + (tf.text.length * 8.0f);
+            float cursorY = frame.origin.y + (frame.size.height - 16.0f) / 2.0f;
+            float cursorW = 2.0f;
+            float cursorH = 16.0f;
+            
+            // We need to draw a solid rect for cursor.
+            // But we are in "Solid Pipeline" mode or "Text Pipeline" mode?
+            // Currently DrawText switches pipelines.
+            // Let's just draw the cursor text "|" or use a solid quad.
+            // Using a solid quad requires setting up vertices and switching pipeline back if we were in text mode.
+            // But we are currently in solid mode (before DrawText call).
+            
+            // Let's draw cursor as a pipe character for simplicity for now, or just a quad.
+            // Actually, let's defer cursor drawing to be part of the text drawing or just draw it after.
+            
+            // To keep it simple: Draw a "|" character at the end.
+            // But that depends on font.
+            // Let's try drawing a solid quad.
+            
+            // Need to generate vertices for cursor.
+            // ... (Skipping complex cursor logic for this step, just appending | to text if focused?)
+            // No, changing text is bad.
+            
+            // Let's just draw it.
+            // We need to switch to solid pipeline if we were in text pipeline? 
+            // DrawViewRecursively is called. It sets solid pipeline.
+            // Then it draws background.
+            // Then it calls DrawText which sets text pipeline.
+            // So if we want to draw cursor, we should do it BEFORE DrawText or switch back.
+            // DrawText switches back to solid pipeline at the end!
+            
+            // So we can draw cursor after DrawText.
+            // But wait, DrawViewRecursively logic:
+            // 1. Set uniforms for background quad.
+            // 2. Draw background quad.
+            // 3. Draw Text (switches to text, then back to solid).
+            
+            // So we can draw cursor here (before text) or after.
+            // Let's draw it after text to be safe/lazy? 
+            // Actually, let's just append a pipe if focused and we are typing?
+            // No, let's do it properly later. For now, let's just render the text.
+        }
     }
     
     if (text && text.length > 0) {
@@ -389,14 +443,53 @@ void DrawViewRecursively(PVView *view, id<MTLRenderCommandEncoder> renderEncoder
         float b = ((color >> 8) & 0xFF) / 255.0f;
         float a = (color & 0xFF) / 255.0f;
         
-        // Center text
-        float textW = text.length * 8.0f;
-        float textH = 16.0f;
+        // Center text for Buttons, Left align for others?
+        float tx, ty;
         
-        float tx = frame.origin.x + (frame.size.width - textW) / 2.0f;
-        float ty = frame.origin.y + (frame.size.height - textH) / 2.0f;
+        if ([view isKindOfClass:[PVButton class]]) {
+            float textW = text.length * 8.0f;
+            float textH = 16.0f;
+            tx = frame.origin.x + (frame.size.width - textW) / 2.0f;
+            ty = frame.origin.y + (frame.size.height - textH) / 2.0f;
+        } else if ([view isKindOfClass:[PVTextField class]]) {
+             // Left align with padding
+            tx = frame.origin.x + 4.0f;
+            ty = frame.origin.y + (frame.size.height - 16.0f) / 2.0f;
+        } else {
+             // Left align
+            tx = frame.origin.x;
+            ty = frame.origin.y + (frame.size.height - 16.0f) / 2.0f;
+        }
         
         DrawText(renderEncoder, text, CGPointMake(tx, ty), screenSize, r, g, b, a);
+    }
+    
+    // Draw Cursor for TextField (Simple Quad)
+    if ([view isKindOfClass:[PVTextField class]] && ((PVTextField *)view).isFocused) {
+        PVTextField *tf = (PVTextField *)view;
+        float cursorX = frame.origin.x + 4.0f + (tf.text.length * 8.0f);
+        float cursorY = frame.origin.y + (frame.size.height - 16.0f) / 2.0f;
+        float cursorW = 2.0f;
+        float cursorH = 16.0f;
+        
+        // Calculate NDC for cursor
+        float scaleX = cursorW / screenSize.width;
+        float scaleY = cursorH / screenSize.height;
+        float centerX = cursorX + cursorW / 2.0f;
+        float centerY = cursorY + cursorH / 2.0f;
+        float ndcX = (centerX / screenSize.width) * 2.0 - 1.0;
+        float ndcY = 1.0 - (centerY / screenSize.height) * 2.0;
+        
+        Uniforms cursorUniforms;
+        cursorUniforms.scale[0] = scaleX;
+        cursorUniforms.scale[1] = scaleY;
+        cursorUniforms.offset[0] = ndcX;
+        cursorUniforms.offset[1] = ndcY;
+        cursorUniforms.color[0] = 1.0; cursorUniforms.color[1] = 1.0; cursorUniforms.color[2] = 1.0; cursorUniforms.color[3] = 1.0; // White cursor
+        
+        [renderEncoder setVertexBytes:&cursorUniforms length:sizeof(Uniforms) atIndex:1];
+        [renderEncoder setFragmentBytes:&cursorUniforms length:sizeof(Uniforms) atIndex:1];
+        [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
     }
     
     // Recurse
@@ -465,6 +558,17 @@ void HandleMouseRecursively(PVView *view, CGPoint mousePos, CGPoint parentOrigin
         PVButton *btn = (PVButton *)view;
         btn.isHovering = isInside;
         btn.isDown = isDown && isInside;
+    }
+    
+    if (isDown && [view isKindOfClass:[PVTextField class]]) {
+        PVTextField *tf = (PVTextField *)view;
+        tf.isFocused = isInside;
+    } else if (isDown && !isInside && [view isKindOfClass:[PVTextField class]]) {
+        // Clicked outside
+        // ((PVTextField *)view).isFocused = NO; // Handled above if isInside is false? No.
+        // Logic: if we click somewhere, we want to unfocus others?
+        // Simple logic: if isDown and isInside is false, set focused to false.
+        ((PVTextField *)view).isFocused = NO;
     }
     
     for (PVView *subview in view.subviews) {

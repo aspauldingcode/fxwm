@@ -80,7 +80,7 @@
             -framework Foundation -framework IOSurface -framework CoreGraphics -framework QuartzCore \
             -framework Metal \
             -lc++ \
-            libprotein_render.m mouse_events.m metal_renderer.m ui.m iso_font.c sym.c
+            libprotein_render.m mouse_events.m keyboard_events.m metal_renderer.m ui.m iso_font.c sym.c
         '';
         installPhase = ''
           mkdir -p $out/lib

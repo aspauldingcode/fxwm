@@ -15,9 +15,9 @@
 #import "protein_events.h"
 #import "mouse_events.h"
 
-// ============================================================================ 
+// ============================================================================
 // MARK: - SLSEventRecord Structure (Removed - Moved to mouse_events.m)
-// ============================================================================ 
+// ============================================================================
 
 // Global mouse event callback (Removed - Moved to mouse_events.m)
 
@@ -131,9 +131,9 @@ void (*_ScheduleUpdateAllDisplays)(__int64 a1, __int64 a2); // a3 usually one
 void (*__SERVER_COMMIT_START)(__int64 * int_ptr, CAContext *ptr);
 void (*__SERVER_COMMIT_END)(__int64 * int_ptr);
 
-// ============================================================================ 
+// ============================================================================
 // MARK: - Mouse Event Function Pointers (Removed)
-// ============================================================================ 
+// ============================================================================
 
 // Get window ID from window pointer
 int (*_WSWindowGetID)(void *window);
@@ -222,6 +222,7 @@ void *MarkWindows(__int64 a1, unsigned int a2, const void *a3, int a4) {
 }
 
 #import "ui.h"
+#import "keyboard_events.h"
 
 // Global (non-static) for access by mouse_events.m
 void *gWindowRoot = NULL;
@@ -229,19 +230,19 @@ CAContext *gRootContextPtr = NULL;
 CGRect gWindowRootBounds = {0, 0, 1800, 1169};
 
 // Root of our view hierarchy
-static PVView *gRootView = nil;
+PVView *gRootView = nil; // Removed static
 
 // ============================================================================ 
 // MARK: - Mouse Event Public API (Removed - Moved to mouse_events.m)
-// ============================================================================ 
+// ============================================================================
 
-// ============================================================================ 
+// ============================================================================
 // MARK: - Default Mouse Handler (Removed - Moved to mouse_events.m)
-// ============================================================================ 
+// ============================================================================
 
-// ============================================================================ 
+// ============================================================================
 // MARK: - Mouse Event Hook (Removed - Moved to mouse_events.m)
-// ============================================================================ 
+// ============================================================================
 
 void HideAllWindowsTest(void) {
     pthread_mutex_lock(&gWindowListLock);
@@ -283,7 +284,7 @@ static void ProteinMouseHandler(
             // But we only get "isDown" passed as a bool to renderer.
             // Renderer logic: hover && down -> pressed.
             // If we are dragging, we are down.
-            isDown = true; 
+            isDown = true;
             break;
         default:
             // MouseMoved
@@ -323,7 +324,7 @@ void UpdateProteinRoot(void) {
         NSLog(@"[Protein] Window created with bounds: %.0f,%.0f %.0fx%.0f",
               gWindowRootBounds.origin.x, gWindowRootBounds.origin.y,
               gWindowRootBounds.size.width, gWindowRootBounds.size.height);
-        
+
     } else {
         __int64 intptr = 0;
         [CATransaction begin];
@@ -333,7 +334,7 @@ void UpdateProteinRoot(void) {
         __SERVER_COMMIT_START(&intptr, gRootContextPtr);
 
         gRootContextPtr.layer.backgroundColor = CGColorCreateSRGB(0.5, 0, 0, 1.0);
-        
+
         // Render the view hierarchy
         if (gRootView) {
             MetalRendererRender(gRootView, gRootContextPtr.layer);
@@ -355,7 +356,7 @@ __int64 UpdateHook(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
     static dispatch_once_t once;
     static dispatch_source_t timer = NULL;
 
-    dispatch_once(&once, ^{ 
+    dispatch_once(&once, ^{
         timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,
                                        0, 0,
                                        dispatch_get_main_queue());
@@ -365,7 +366,7 @@ __int64 UpdateHook(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
                                   16 * NSEC_PER_MSEC,
                                   1 * NSEC_PER_MSEC);
 
-        dispatch_source_set_event_handler(timer, ^{ 
+        dispatch_source_set_event_handler(timer, ^{
             @autoreleasepool {
                 HideAllWindowsTest();
                 UpdateProteinRoot();
@@ -395,6 +396,7 @@ void _RenderSetup(void) {
     // Initialize mouse event handling
     SetupMouseEvents();
     ProteinSetMouseEventCallback(ProteinMouseHandler, NULL);
+    SetupKeyboardEvents();
     
     // Setup View Hierarchy
     gRootView = [[PVView alloc] init];
@@ -420,6 +422,18 @@ void _RenderSetup(void) {
     lbl.text = @"Hello Label";
     lbl.textColor = 0xFF00FFFF; // Magenta
     [gRootView addSubview:lbl];
+
+    // Add a text field
+    PVTextField *tf = [[PVTextField alloc] init];
+    tf.frame = CGRectMake(800, 600, 200, 40);
+    tf.placeholder = @"Type here...";
+    tf.textColor = 0xFFFFFFFF;
+    tf.backgroundColor = 0x555555FF;
+    tf.onEnter = ^(NSString *text) {
+        NSLog(@"[Protein] Text Entered: %@", text);
+        lbl.text = [NSString stringWithFormat:@"Entered: %@", text];
+    };
+    [gRootView addSubview:tf];
 }
 
 Boolean setupAlready = false;

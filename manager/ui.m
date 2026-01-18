@@ -145,3 +145,53 @@
 }
 
 @end
+
+@implementation PVTextField
+
+@synthesize text = _text;
+@synthesize placeholder = _placeholder;
+@synthesize textColor = _textColor;
+@synthesize isFocused = _isFocused;
+@synthesize onEnter = _onEnter;
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _text = [@"" copy];
+        _placeholder = [@"" copy];
+        _textColor = 0xFFFFFFFF;
+        self.backgroundColor = 0x333333FF; // Dark gray background
+        _isFocused = NO;
+    }
+    return self;
+}
+
+- (void)dealloc {
+    [_text release];
+    [_placeholder release];
+    if (_onEnter) [ (id)_onEnter release];
+    [super dealloc];
+}
+
+- (void)handleKeyDown:(uint16_t)keyCode character:(char)character {
+    if (keyCode == 36) { // Return key
+        if (_onEnter) {
+            _onEnter(_text);
+        }
+        return;
+    }
+    
+    if (keyCode == 51) { // Delete key
+        if (_text.length > 0) {
+            self.text = [_text substringToIndex:_text.length - 1];
+        }
+        return;
+    }
+    
+    // Simple printable character check (very basic)
+    if (character >= 32 && character <= 126) {
+        self.text = [_text stringByAppendingFormat:@"%c", character];
+    }
+}
+
+@end

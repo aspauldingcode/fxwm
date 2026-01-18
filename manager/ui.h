@@ -44,3 +44,21 @@
 @property (nonatomic, assign) BOOL isDown;
 @property (nonatomic, copy) void (^onClick)(void);
 @end
+
+@interface PVTextField : PVView {
+    NSString *_text;
+    NSString *_placeholder;
+    uint32_t _textColor;
+    BOOL _isFocused;
+    void (^_onEnter)(NSString *text);
+}
+
+@property (nonatomic, copy) NSString *text;
+@property (nonatomic, copy) NSString *placeholder;
+@property (nonatomic, assign) uint32_t textColor;
+@property (nonatomic, assign) BOOL isFocused;
+@property (nonatomic, copy) void (^onEnter)(NSString *text);
+
+- (void)handleKeyDown:(uint16_t)keyCode character:(char)character;
+
+@end
