@@ -254,16 +254,21 @@ doorman_result_t doorman_get_groups(const char *user,
 
     /* macOS's getgrouplist() takes an int* buffer (glibc uses gid_t*); we use
      * int here to match the platform and convert to gid_t for the caller.
-     * The buffer may need to grow to report the full membership. */
-    int ngroups = 16;
-    int *buf = malloc((size_t)ngroups * sizeof(*buf));
-    if (!buf) return DOORMAN_ERR_SYSTEM;
-
-    while (getgrouplist(user, (int)primary, buf, &ngroups) == -1) {
+     * The buffer may need to grow to report the full membership. We guarantee
+     * forward progress and cap the attempts: some macOS versions return -1
+     * without enlarging *ngroups, which would otherwise spin forever. */
+    int ngroups = 32;
+    int *buf = NULL;
+    bool ok = false;
+    for (int attempt = 0; attempt < 12; attempt++) {
         int *tmp = realloc(buf, (size_t)ngroups * sizeof(*buf));
         if (!tmp) { free(buf); return DOORMAN_ERR_SYSTEM; }
         buf = tmp;
+        int prev = ngroups;
+        if (getgrouplist(user, (int)primary, buf, &ngroups) != -1) { ok = true; break; }
+        if (ngroups <= prev) ngroups = prev * 2; /* ensure the buffer grows */
     }
+    if (!ok) { free(buf); return DOORMAN_ERR_SYSTEM; }
 
     gid_t *out = malloc((size_t)ngroups * sizeof(*out));
     if (!out) { free(buf); return DOORMAN_ERR_SYSTEM; }
