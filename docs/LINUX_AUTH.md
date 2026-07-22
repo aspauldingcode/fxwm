@@ -162,3 +162,7 @@ Two facts make the port clean rather than an emulation:
 The result: a login program (for example a Wayland display manager being
 ported to macOS) can keep its PAM-style structure and its `.desktop` session
 model, and only swap `libpam`/NSS calls for the equivalent `libmacauth` calls.
+
+For the *complete* enumeration of every place the two platforms diverge — and
+exactly which differences the framework bridges versus surfaces — see
+[`AUTH_DIFFERENCES.md`](AUTH_DIFFERENCES.md).

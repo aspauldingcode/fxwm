@@ -30,6 +30,7 @@ Basalt (internal name `fxwm`) is an experimental window manager and desktop envi
 - **`src/`**: The bootstrap loader. Handles the read-write overlay creation and injection setup to override the system process.
 - **`examples/macdm/`**: A minimal console "display manager" showing how an external login program links and drives `libmacauth`.
 - **`docs/LINUX_AUTH.md`**: How Linux authenticates users (PAM, NSS, shadow/`crypt`, display managers) and how `libmacauth` ports that model to macOS.
+- **`docs/AUTH_DIFFERENCES.md`**: The exhaustive macOS-vs-Linux authentication difference map (identity DB, hashing, PAM/OpenDirectory, authorization, FileVault/SecureToken/keychain, sessions, groups, biometrics) with a per-area scorecard of what `libmacauth` bridges.
 
 ## Building and Running
 

@@ -10,6 +10,8 @@
 #include <security/pam_appl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <grp.h>
 #include "macauth_internal.h"
 
 const char *macauth_strerror(macauth_result_t result) {
@@ -221,6 +223,56 @@ macauth_result_t macauth_acct_mgmt(macauth_handle_t *handle) {
         return _macauth_pam_acct_mgmt(handle);
 
     return _macauth_acct_mgmt_directory(handle->user);
+}
+
+macauth_result_t macauth_setcred(macauth_handle_t *handle,
+                                 macauth_cred_flag_t flag) {
+    if (!handle) return MACAUTH_ERR_INVALID_ARG;
+    if (!handle->authenticated) return MACAUTH_ERR_ABORT;
+
+    if (handle->backend == MACAUTH_BACKEND_PAM)
+        return _macauth_pam_setcred(handle, (int)flag);
+
+    /* Directory backends: establishing keychain/Kerberos credentials for
+     * another user from outside their security session is not supported by
+     * macOS, so this is a documented no-op. See docs/AUTH_DIFFERENCES.md §5. */
+    return MACAUTH_SUCCESS;
+}
+
+macauth_result_t macauth_get_groups(const char *user,
+                                    gid_t **gids,
+                                    size_t *count) {
+    if (!user || !gids || !count) return MACAUTH_ERR_INVALID_ARG;
+    *gids = NULL;
+    *count = 0;
+
+    macauth_user_t u;
+    if (macauth_lookup_user(user, &u) != MACAUTH_SUCCESS)
+        return MACAUTH_ERR_USER_UNKNOWN;
+    gid_t primary = u.gid;
+    macauth_free_user_fields(&u);
+
+    /* macOS's getgrouplist() takes an int* buffer (glibc uses gid_t*); we use
+     * int here to match the platform and convert to gid_t for the caller.
+     * The buffer may need to grow to report the full membership. */
+    int ngroups = 16;
+    int *buf = malloc((size_t)ngroups * sizeof(*buf));
+    if (!buf) return MACAUTH_ERR_SYSTEM;
+
+    while (getgrouplist(user, (int)primary, buf, &ngroups) == -1) {
+        int *tmp = realloc(buf, (size_t)ngroups * sizeof(*buf));
+        if (!tmp) { free(buf); return MACAUTH_ERR_SYSTEM; }
+        buf = tmp;
+    }
+
+    gid_t *out = malloc((size_t)ngroups * sizeof(*out));
+    if (!out) { free(buf); return MACAUTH_ERR_SYSTEM; }
+    for (int i = 0; i < ngroups; i++) out[i] = (gid_t)buf[i];
+    free(buf);
+
+    *gids = out;
+    *count = (size_t)ngroups;
+    return MACAUTH_SUCCESS;
 }
 
 macauth_result_t macauth_authenticate_password(const char *user,

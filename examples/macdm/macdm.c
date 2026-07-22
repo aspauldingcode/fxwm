@@ -131,6 +131,7 @@ int main(int argc, char **argv) {
 
     macauth_result_t r = macauth_authenticate(h);
     if (r == MACAUTH_SUCCESS) r = macauth_acct_mgmt(h);
+    if (r == MACAUTH_SUCCESS) r = macauth_setcred(h, MACAUTH_CRED_ESTABLISH);
 
     if (r != MACAUTH_SUCCESS) {
         fprintf(stderr, "login failed: %s\n", macauth_strerror(r));
@@ -140,6 +141,16 @@ int main(int argc, char **argv) {
         return 1;
     }
     printf("Authentication succeeded for %s.\n", user);
+
+    /* Supplementary groups, the way a login program resolves them before
+     * dropping privileges (getgrouplist parity). */
+    gid_t *gids = NULL; size_t ngids = 0;
+    if (macauth_get_groups(user, &gids, &ngids) == MACAUTH_SUCCESS) {
+        printf("Groups (%zu):", ngids);
+        for (size_t i = 0; i < ngids; i++) printf(" %u", (unsigned)gids[i]);
+        printf("\n");
+        free(gids);
+    }
 
     /* 4. Launch a session (only if there is a real one and we can). */
     if (nsessions > 0) {

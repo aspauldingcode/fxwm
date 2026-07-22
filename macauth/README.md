@@ -5,9 +5,14 @@ that any project can sign a user in to macOS through one stable C ABI.
 
 It exposes the same conceptual flow a Linux login stack uses — start a
 transaction, run a *conversation* to collect credentials, authenticate,
-validate the account, open a session — and backs each step with a native macOS
-mechanism. See [`../docs/LINUX_AUTH.md`](../docs/LINUX_AUTH.md) for the full
-Linux→macOS mapping that motivates the design.
+validate the account, establish credentials, open a session — and backs each
+step with a native macOS mechanism.
+
+- [`../docs/LINUX_AUTH.md`](../docs/LINUX_AUTH.md) — how Linux authenticates
+  users, and the Linux→macOS mapping that motivates the design.
+- [`../docs/AUTH_DIFFERENCES.md`](../docs/AUTH_DIFFERENCES.md) — the exhaustive
+  macOS-vs-Linux difference map with a per-area "bridge scorecard" showing what
+  the framework hides and the few macOS realities it can only surface.
 
 The intended consumers are login programs that were not written for macOS —
 for example a port of a Wayland display manager, which wants to present a user
@@ -39,10 +44,14 @@ macauth_handle_t *h;
 macauth_start("login", user, &conv, MACAUTH_BACKEND_PAM, &h);
 macauth_authenticate(h);      /* prompts via my_conv_fn                    */
 macauth_acct_mgmt(h);         /* account allowed to log in?                */
+macauth_setcred(h, MACAUTH_CRED_ESTABLISH);          /* pam_setcred parity     */
 
 /* Display-manager helpers: */
 macauth_user_t *users; size_t nu;
 macauth_enumerate_users(true, &users, &nu);          /* login-eligible users   */
+
+gid_t *gids; size_t ng;
+macauth_get_groups(user, &gids, &ng);                /* getgrouplist parity    */
 
 macauth_session_t *sessions; size_t ns;
 macauth_enumerate_sessions(&sessions, &ns);          /* .desktop + aqua        */

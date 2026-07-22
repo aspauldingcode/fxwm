@@ -40,6 +40,7 @@ macauth_result_t _macauth_verify_opendirectory(const char *user, const char *pas
  */
 macauth_result_t _macauth_pam_authenticate(macauth_handle_t *handle);
 macauth_result_t _macauth_pam_acct_mgmt(macauth_handle_t *handle);
+macauth_result_t _macauth_pam_setcred(macauth_handle_t *handle, int flag);
 
 /* Account validity checks for the directory backends. */
 macauth_result_t _macauth_acct_mgmt_directory(const char *user);

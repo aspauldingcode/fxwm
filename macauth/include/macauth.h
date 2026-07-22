@@ -200,6 +200,48 @@ macauth_result_t macauth_authenticate(macauth_handle_t *handle);
  */
 macauth_result_t macauth_acct_mgmt(macauth_handle_t *handle);
 
+/*
+ * Credential establishment flags, mirroring pam_setcred()'s flags.
+ */
+typedef enum macauth_cred_flag {
+    MACAUTH_CRED_ESTABLISH    = 1, /* set up user credentials                 */
+    MACAUTH_CRED_DELETE       = 2, /* tear down credentials                   */
+    MACAUTH_CRED_REINITIALIZE = 3, /* fully refresh credentials               */
+    MACAUTH_CRED_REFRESH      = 4, /* extend the lifetime of credentials      */
+} macauth_cred_flag_t;
+
+/*
+ * Establish (or tear down) the authenticated user's credentials. Mirrors
+ * pam_setcred(). This is the phase that, on Linux, acquires a Kerberos ticket
+ * or joins the kernel keyring; on macOS the analogue is establishing the
+ * OpenDirectory/Kerberos credential and unlocking the login keychain.
+ *
+ * With the PAM backend this calls the real pam_setcred() and therefore runs
+ * whatever the configured stack does. With the directory backends it is a
+ * safe no-op returning MACAUTH_SUCCESS: there is no supported way to unlock a
+ * *different* user's login keychain from outside that user's security session,
+ * so credential material that depends on the plaintext password must be
+ * established inside the launched session. See docs/AUTH_DIFFERENCES.md §5, §9.
+ *
+ * Must be called after a successful macauth_authenticate().
+ */
+macauth_result_t macauth_setcred(macauth_handle_t *handle,
+                                 macauth_cred_flag_t flag);
+
+/*
+ * Resolve the supplementary group id list for a user, the way a login program
+ * does before initgroups(). Wraps getgrouplist(), which is serviced by
+ * opendirectoryd on macOS and NSS on Linux, so the result matches across
+ * platforms for the common (non-nested) case. See docs/AUTH_DIFFERENCES.md §6.
+ *
+ * On success *gids points to a heap array of *count gid_t values (the primary
+ * gid is included first); free it with free(). If the user has more groups
+ * than a reasonable buffer, the list is still returned fully.
+ */
+macauth_result_t macauth_get_groups(const char *user,
+                                    gid_t **gids,
+                                    size_t *count);
+
 /* ------------------------------------------------------------------------- */
 /* MARK: - Convenience one-shot authentication                               */
 /* ------------------------------------------------------------------------- */

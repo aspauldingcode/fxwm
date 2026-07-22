@@ -156,3 +156,21 @@ macauth_result_t _macauth_pam_acct_mgmt(macauth_handle_t *handle) {
     int rc = pam_acct_mgmt(state->pamh, 0);
     return pam_status_to_macauth(rc);
 }
+
+macauth_result_t _macauth_pam_setcred(macauth_handle_t *handle, int flag) {
+    if (!handle) return MACAUTH_ERR_INVALID_ARG;
+    pam_state_t *state = (pam_state_t *)handle->backend_state;
+    if (!state || !state->pamh) return MACAUTH_ERR_ABORT;
+
+    int pam_flag;
+    switch (flag) {
+        case MACAUTH_CRED_DELETE:       pam_flag = PAM_DELETE_CRED; break;
+        case MACAUTH_CRED_REINITIALIZE: pam_flag = PAM_REINITIALIZE_CRED; break;
+        case MACAUTH_CRED_REFRESH:      pam_flag = PAM_REFRESH_CRED; break;
+        case MACAUTH_CRED_ESTABLISH:
+        default:                        pam_flag = PAM_ESTABLISH_CRED; break;
+    }
+
+    int rc = pam_setcred(state->pamh, pam_flag);
+    return pam_status_to_macauth(rc);
+}
