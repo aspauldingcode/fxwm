@@ -38,6 +38,48 @@ jobs:
       - name: "Integration test (privileged: create / login / interop / delete)"
         run: sudo BINDIR="$PWD/build/bin" ./tests/integration.sh
 
+  nix-flake:
+    name: Nix flake build (universal artifacts)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Build the distributable tree with the flake
+        run: nix build .#dist -L --option sandbox false
+
+      - name: Verify contents and universal slices
+        run: |
+          ls -lR result/
+          test -f result/lib/libdoorman.a
+          test -f result/lib/libdoorman.dylib
+          test -f result/include/doorman.h
+          test -x result/bin/doorman
+          test -x result/bin/macdm
+          test -L result/bin/useradd && test -L result/bin/passwd
+          lipo -info result/lib/libdoorman.dylib
+          lipo -info result/bin/doorman
+          lipo -info result/lib/libdoorman.dylib | grep -q arm64
+          lipo -info result/lib/libdoorman.dylib | grep -q x86_64
+          result/bin/doorman --help
+          result/bin/doorman users >/dev/null
+
+      - name: Stage artifact (dereference the store symlink)
+        run: |
+          mkdir -p dist/doorman-macos-universal
+          cp -R result/. dist/doorman-macos-universal/
+          chmod -R u+w dist
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: doorman-macos-universal
+          path: dist/
+
   verify-headers:
     name: Header ABI (C & C++)
     runs-on: macos-26

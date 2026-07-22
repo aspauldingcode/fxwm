@@ -1,0 +1,78 @@
+name: Release
+
+# Automated releases: pushing a `v*` tag builds the framework with the Nix
+# flake on a macOS 26 runner and publishes the prebuilt universal artifacts
+# as a GitHub Release, so consumers never have to build Doorman themselves.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build (Nix flake) & publish
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the distributable tree with the flake
+        run: nix build .#dist -L --option sandbox false
+
+      - name: Sanity-check the artifacts
+        run: |
+          test -f result/lib/libdoorman.a
+          test -f result/lib/libdoorman.dylib
+          test -f result/include/doorman.h
+          test -x result/bin/doorman
+          lipo -info result/lib/libdoorman.dylib | grep -q arm64
+          lipo -info result/lib/libdoorman.dylib | grep -q x86_64
+          result/bin/doorman --help
+
+      - name: Package release archive
+        id: pkg
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          NAME="doorman-${V}-macos-universal"
+          mkdir -p "$NAME"
+          cp -R result/. "$NAME"/
+          chmod -R u+w "$NAME"
+          tar czf "${NAME}.tar.gz" "$NAME"
+          shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+          cat "${NAME}.tar.gz.sha256"
+          echo "archive=${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Doorman ${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.pkg.outputs.archive }}
+            ${{ steps.pkg.outputs.archive }}.sha256
+
+      - name: Upload artifact (manual runs)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: doorman-macos-universal
+          path: |
+            ${{ steps.pkg.outputs.archive }}
+            ${{ steps.pkg.outputs.archive }}.sha256
