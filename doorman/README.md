@@ -114,6 +114,54 @@ cc yourapp.c -I<doorman>/include \
 Produces `libdoorman.a` (for embedding) and `libdoorman.dylib` (for dynamic
 consumers), plus the installed public header.
 
+Both build systems compile with a strict, **warnings-as-errors** set
+(`-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wcast-qual
+-Wstrict-prototypes -Wmissing-prototypes -Wformat=2 …`) and the library is
+expected to build clean under all of it.
+
+## Performance
+
+Doorman is built for low overhead, but it is worth being precise about where the
+time actually goes so effort is spent where it matters.
+
+**Build-level optimizations.** The library is compiled at `-O2` with
+`-fvisibility=hidden`, so only the `doorman_*` API lands in the dynamic symbol
+table — every `_dm_*` internal is hidden. That yields a smaller dylib, faster
+dyld binding at load, and more inlining freedom for the optimizer. Releases ship
+as a single universal (arm64 + x86_64) binary.
+
+**Where the time goes.** The authentication hot path is intentionally
+dominated by two costs that Doorman does not (and should not) shortcut:
+
+- **PBKDF2 key derivation.** Verifying a password re-runs SALTED-SHA512-PBKDF2
+  with the *stored* iteration count. That is deliberately expensive — it is the
+  brute-force defense — and is the single largest term, on the order of
+  milliseconds. Making it "faster" would weaken security, so Doorman honours the
+  OS-chosen iteration count exactly.
+- **opendirectoryd IPC.** The OpenDirectory backend does one round-trip to the
+  directory daemon. It is what gives you local + network/mobile account support
+  for free; the offline `DSLOCAL` backend skips it (a single plist read) for
+  contexts where the daemon isn't available.
+
+Relative to those, Doorman's own overhead is negligible: a handful of small heap
+allocations and string copies, no locks, no polling, and no background threads.
+Concretely:
+
+- **Enumeration** is a single `getpwent()` pass — O(n) in the number of accounts
+  — with a geometrically growing buffer (no re-scan).
+- **Group resolution** is one `getgrouplist()` call into a doubling, bounded
+  buffer (capped retries, so it can never spin).
+- **Session launch** is a single `fork`/`execle` with the environment assembled
+  once in the parent; the child does no allocation before `exec`.
+- **Secret scrubbing** is a linear wipe of the password buffer only.
+
+**Practical guidance.** For repeated one-off checks use
+`doorman_authenticate_password()` to avoid transaction/conversation setup. Pick
+`DSLOCAL` when you must avoid the daemon round-trip, `OPENDIRECTORY`/`AUTO`
+otherwise. The dominant latency is the KDF; if you need it faster the only
+sound lever is the stored iteration count, which is a system password policy
+decision, not a library one.
+
 ## Example
 
 [`../examples/macdm`](../examples/macdm) is a minimal terminal "display
@@ -123,11 +171,18 @@ display-manager port should consume the framework.
 
 ## Security notes
 
-- Password buffers collected internally are zeroed before being freed, and the
-  dsLocal backend compares derived keys in constant time.
+- Password buffers are scrubbed through a `volatile` pointer before being freed
+  (so the wipe survives optimization), and the dsLocal backend compares derived
+  keys in constant time.
+- Account/group names are validated before they touch a filesystem path or a
+  system tool, blocking path traversal and argument injection; passwords are set
+  through the OpenDirectory API, never on a command line.
 - The directory backends need read access to the local store (run as root) for
   the dsLocal path; OpenDirectory enforces its own access via opendirectoryd.
 - `doorman_open_session` only drops privileges when the caller is root; other-
   wise it can launch a session for the current user (handy for development).
 - This is experimental software that authenticates real macOS accounts. Review
   it before using it anywhere that matters.
+
+The full threat model and mitigations are in
+[`../docs/SECURITY.md`](../docs/SECURITY.md).
