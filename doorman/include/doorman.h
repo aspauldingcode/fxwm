@@ -1,4 +1,6 @@
 /*
+ * SPDX-License-Identifier: MIT
+ *
  * doorman.h - Doorman, a macOS user authentication framework
  *
  * Doorman checks a user's credentials at the door and admits them into a

@@ -27,6 +27,8 @@ interoperate.
 
 Hard constraints:
 
+- License: MIT (permissive; embeddable in proprietary software, attribution
+  required).
 - macOS only. It will not compile or run on Linux.
 - C ABI. Consumable from C, Objective-C, C++ (header is C11- and C++17-clean),
   Swift (bridging header/module map), or any FFI (Rust, Go, Python ctypes...).

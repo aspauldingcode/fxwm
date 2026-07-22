@@ -57,6 +57,12 @@
           cp libdoorman.a libdoorman.dylib $out/lib/
           cp include/doorman.h $out/include/
         '';
+        meta = {
+          description = "PAM-inspired macOS user authentication & account-management framework";
+          homepage = "https://github.com/aspauldingcode/fxwm";
+          license = pkgs.lib.licenses.mit;
+          platforms = systems;
+        };
       };
 
       # The CLI (+ Linux-tool symlinks) linked against the static archive.
@@ -79,6 +85,12 @@
             ln -sf doorman $out/bin/$t
           done
         '';
+        meta = {
+          description = "Doorman CLI and Linux account-tool shims";
+          homepage = "https://github.com/aspauldingcode/fxwm";
+          license = pkgs.lib.licenses.mit;
+          platforms = systems;
+        };
       };
 
       # The console "display manager" example consumer.
@@ -98,6 +110,12 @@
           mkdir -p $out/bin
           cp macdm $out/bin/
         '';
+        meta = {
+          description = "Minimal console display-manager example built on libdoorman";
+          homepage = "https://github.com/aspauldingcode/fxwm";
+          license = pkgs.lib.licenses.mit;
+          platforms = systems;
+        };
       };
 
       # A single distributable tree (lib + header + bin + docs) that the release
@@ -108,6 +126,7 @@
         cp ${doorman}/include/* $out/include/
         cp -R ${cli}/bin/. $out/bin/
         cp ${example}/bin/* $out/bin/
+        cp ${./LICENSE} $out/LICENSE
         cp ${./doorman/README.md} $out/share/doc/doorman/README.md
         cp ${./docs/API.md} $out/share/doc/doorman/API.md
         cp ${./docs/SECURITY.md} $out/share/doc/doorman/SECURITY.md

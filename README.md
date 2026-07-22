@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/aspauldingcode/fxwm/actions/workflows/ci.yml/badge.svg)](https://github.com/aspauldingcode/fxwm/actions/workflows/ci.yml)
 [![Release](https://github.com/aspauldingcode/fxwm/actions/workflows/release.yml/badge.svg)](https://github.com/aspauldingcode/fxwm/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **A macOS user authentication & account-management framework.**
 
@@ -135,3 +136,12 @@ worked example — is in [`docs/API.md`](docs/API.md).
   delete paths end to end.
 - **Releases** (`.github/workflows/release.yml`) build the flake and publish a
   universal artifact to a GitHub Release automatically when a `v*` tag is pushed.
+
+## License
+
+[MIT](LICENSE). Doorman is a library meant to be embedded — in display
+managers, greeters, account tooling, or proprietary apps — and linked from any
+language over its C ABI, so it uses the most permissive mainstream license:
+no copyleft obligations for static or dynamic linking, just attribution. Its
+only third-party dependencies are Apple's system frameworks and macOS's
+BSD-licensed OpenPAM, so nothing upstream constrains this choice.

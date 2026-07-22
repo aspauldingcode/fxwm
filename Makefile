@@ -82,11 +82,12 @@ test: tests
 	$(BINDIR)/test_doorman
 
 install: all
-	@install -d $(PREFIX)/lib $(PREFIX)/include $(PREFIX)/bin
+	@install -d $(PREFIX)/lib $(PREFIX)/include $(PREFIX)/bin $(PREFIX)/share/doc/doorman
 	install -m 0644 $(STATICLIB) $(PREFIX)/lib/
 	install -m 0755 $(DYLIB) $(PREFIX)/lib/
 	install -m 0644 doorman/include/doorman.h $(PREFIX)/include/
 	install -m 0755 $(BINDIR)/doorman $(PREFIX)/bin/
+	install -m 0644 LICENSE $(PREFIX)/share/doc/doorman/LICENSE
 	@for t in $(TOOLLINKS); do ln -sf doorman $(PREFIX)/bin/$$t; done
 
 clean:

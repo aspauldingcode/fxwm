@@ -9,6 +9,7 @@
 
 Key facts an agent should know before generating code against Doorman:
 
+- License: MIT — freely embeddable in open-source or proprietary software.
 - Platform: macOS only. Language: C ABI (usable from C, Objective-C, C++,
   Swift via bridging header, or any FFI). Single header: `doorman/include/doorman.h`.
 - Link line: `-framework Foundation -framework OpenDirectory -framework Security -lpam -lobjc`
