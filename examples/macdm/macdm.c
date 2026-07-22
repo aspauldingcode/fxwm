@@ -34,7 +34,7 @@ static char *read_secret(const char *prompt) {
     struct termios oldt, newt;
     tcgetattr(STDIN_FILENO, &oldt);
     newt = oldt;
-    newt.c_lflag &= ~(unsigned)ECHO;
+    newt.c_lflag &= ~(tcflag_t)ECHO;
     tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
     char *line = NULL;

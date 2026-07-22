@@ -23,7 +23,18 @@ OBJ       := $(BUILD)/obj
 LIBDIR    := $(BUILD)/lib
 BINDIR    := $(BUILD)/bin
 
-CFLAGS    := -arch $(ARCH) -Wall -Wextra -O2 -fobjc-arc -Idoorman/include
+# Strict, warnings-as-errors. This is the same set CI enforces; the library is
+# expected to build clean under all of it.
+STRICT    := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion \
+             -Wcast-qual -Wpointer-arith -Wstrict-prototypes -Wmissing-prototypes \
+             -Wformat=2 -Wundef -Wvla -Werror
+
+# -fvisibility=hidden keeps every internal (_dm_*) symbol out of the dynamic
+# symbol table; only the doorman_* API (marked default in the header) is
+# exported. Smaller dylib, faster dyld binding, more room to inline.
+CFLAGS    := -arch $(ARCH) -O2 -fvisibility=hidden $(STRICT) -Idoorman/include
+# Objective-C translation units are built under ARC; the pure-C example is not.
+OBJCARC   := -fobjc-arc
 LDFRAME   := -framework Foundation -framework OpenDirectory -framework Security
 LDLIBS    := -lpam -lobjc
 
@@ -39,7 +50,7 @@ TOOLLINKS := useradd userdel passwd groupadd groupdel usermod
 all: lib cli example tests
 
 $(OBJ)/%.o: doorman/src/%.m | $(OBJ)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(OBJCARC) -c $< -o $@
 
 $(OBJ) $(LIBDIR) $(BINDIR):
 	@mkdir -p $@
@@ -50,12 +61,12 @@ $(STATICLIB): $(LIB_OBJS) | $(LIBDIR)
 	xcrun ar rcs $@ $(LIB_OBJS)
 
 $(DYLIB): $(LIB_OBJS) | $(LIBDIR)
-	$(CC) $(CFLAGS) -dynamiclib -install_name @rpath/libdoorman.dylib \
+	$(CC) $(CFLAGS) $(OBJCARC) -dynamiclib -install_name @rpath/libdoorman.dylib \
 		$(LIB_OBJS) $(LDFRAME) $(LDLIBS) -o $@
 
 cli: $(BINDIR)/doorman
 $(BINDIR)/doorman: cli/doorman.m $(STATICLIB) | $(BINDIR)
-	$(CC) $(CFLAGS) $< $(STATICLIB) $(LDFRAME) $(LDLIBS) -o $@
+	$(CC) $(CFLAGS) $(OBJCARC) $< $(STATICLIB) $(LDFRAME) $(LDLIBS) -o $@
 	@for t in $(TOOLLINKS); do ln -sf doorman $(BINDIR)/$$t; done
 
 example: $(BINDIR)/macdm
@@ -64,7 +75,7 @@ $(BINDIR)/macdm: examples/macdm/macdm.c $(STATICLIB) | $(BINDIR)
 
 tests: $(BINDIR)/test_doorman
 $(BINDIR)/test_doorman: tests/test_doorman.m $(STATICLIB) | $(BINDIR)
-	$(CC) $(CFLAGS) $< $(STATICLIB) $(LDFRAME) $(LDLIBS) -o $@
+	$(CC) $(CFLAGS) $(OBJCARC) $< $(STATICLIB) $(LDFRAME) $(LDLIBS) -o $@
 
 test: tests
 	@echo "== unit tests =="

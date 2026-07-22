@@ -122,10 +122,10 @@ doorman_result_t _dm_pam_authenticate(doorman_handle_t *handle) {
     rc = pam_authenticate(box->pamh, 0);
 
     /* Sync back a username that the stack may have learned. */
-    const char *pam_user = NULL;
-    if (pam_get_item(box->pamh, PAM_USER, (const void **)&pam_user) == PAM_SUCCESS &&
+    const void *pam_user = NULL;
+    if (pam_get_item(box->pamh, PAM_USER, &pam_user) == PAM_SUCCESS &&
         pam_user && !handle->user) {
-        handle->user = strdup(pam_user);
+        handle->user = strdup((const char *)pam_user);
     }
 
     if (rc == PAM_SUCCESS) {

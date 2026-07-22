@@ -10,6 +10,7 @@
 
 #import <Foundation/Foundation.h>
 #include <string.h>
+#include <stdlib.h>
 #include "doorman.h"
 
 /*

@@ -19,6 +19,13 @@
       # Universal (Apple Silicon + Intel) so released binaries run everywhere.
       archs = "-arch arm64 -arch x86_64";
 
+      # Strict warnings-as-errors (mirrors the Makefile / CI) plus hidden
+      # visibility so only the doorman_* API is exported from the dylib.
+      strict = "-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion "
+             + "-Wcast-qual -Wpointer-arith -Wstrict-prototypes -Wmissing-prototypes "
+             + "-Wformat=2 -Wundef -Wvla -Werror";
+      cflags = "-O2 -fvisibility=hidden ${strict}";
+
       # We drive the *system* toolchain (xcrun/clang + the real macOS SDK)
       # because Doorman links private-ish frameworks (OpenDirectory) and the
       # system OpenPAM; hence __noChroot. This is the same impure-but-simple
@@ -39,7 +46,7 @@
         buildPhase = ''
           ${commonEnv}
           for f in src/*.m; do
-            xcrun clang ${archs} -O2 -c -Iinclude "$f" -o "$(basename "$f" .m).o"
+            xcrun clang ${archs} ${cflags} -fobjc-arc -c -Iinclude "$f" -o "$(basename "$f" .m).o"
           done
           xcrun libtool -static -o libdoorman.a *.o
           xcrun clang ${archs} -dynamiclib -install_name @rpath/libdoorman.dylib \
@@ -61,7 +68,7 @@
         dontFixup = true;
         buildPhase = ''
           ${commonEnv}
-          xcrun clang ${archs} -O2 -o doorman \
+          xcrun clang ${archs} ${cflags} -fobjc-arc -o doorman \
             -I${doorman}/include doorman.m ${doorman}/lib/libdoorman.a \
             ${linkFlags} -lobjc
         '';
@@ -83,7 +90,7 @@
         dontFixup = true;
         buildPhase = ''
           ${commonEnv}
-          xcrun clang ${archs} -O2 -o macdm \
+          xcrun clang ${archs} ${cflags} -o macdm \
             -I${doorman}/include macdm.c ${doorman}/lib/libdoorman.a \
             ${linkFlags} -lobjc
         '';

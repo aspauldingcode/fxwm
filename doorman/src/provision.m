@@ -99,6 +99,10 @@ doorman_result_t doorman_create_user(const doorman_user_spec_t *spec) {
         uid_t uid = spec->uid ? spec->uid : allocate_uid();
         gid_t gid = spec->gid ? spec->gid : 20; /* staff */
 
+        /* A caller-supplied field that is not valid UTF-8 decodes to nil, which
+         * would throw when placed in an argument array. Reject it up front. */
+        if (!realName || !home || !shell) return DOORMAN_ERR_INVALID_ARG;
+
         NSArray<NSArray<NSString *> *> *steps = @[
             @[@".", @"-create", recPath],
             @[@".", @"-create", recPath, @"RealName", realName],
@@ -197,7 +201,11 @@ doorman_result_t doorman_create_group(const char *name, gid_t gid,
     @autoreleasepool {
         NSMutableArray *args = [@[@"-o", @"create"] mutableCopy];
         if (gid != 0) { [args addObject:@"-i"]; [args addObject:[@(gid) stringValue]]; }
-        if (full_name) { [args addObject:@"-r"]; [args addObject:[NSString stringWithUTF8String:full_name]]; }
+        if (full_name) {
+            NSString *rn = [NSString stringWithUTF8String:full_name];
+            if (!rn) return DOORMAN_ERR_INVALID_ARG;
+            [args addObject:@"-r"]; [args addObject:rn];
+        }
         [args addObject:[NSString stringWithUTF8String:name]];
         int rc = invoke_tool(kDsEditGroupPath, args);
         return rc == 0 ? DOORMAN_SUCCESS : DOORMAN_ERR_SYSTEM;

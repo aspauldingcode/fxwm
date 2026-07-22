@@ -37,6 +37,7 @@ bool _dm_consttime_equal(const void *a, const void *b, size_t len) {
     const volatile unsigned char *pa = (const volatile unsigned char *)a;
     const volatile unsigned char *pb = (const volatile unsigned char *)b;
     unsigned char accum = 0;
-    for (size_t i = 0; i < len; i++) accum |= (unsigned char)(pa[i] ^ pb[i]);
+    for (size_t i = 0; i < len; i++)
+        accum = (unsigned char)(accum | (unsigned char)(pa[i] ^ pb[i]));
     return accum == 0;
 }

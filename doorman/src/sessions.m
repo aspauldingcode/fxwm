@@ -246,7 +246,7 @@ doorman_result_t doorman_open_session(doorman_handle_t *handle,
         /* --- child: POSIX-only from here to exec --- */
         if (privileged) {
             if (setgid(gid) != 0) _exit(127);
-            if (initgroups(name_dup, gid) != 0) _exit(127);
+            if (initgroups(name_dup, (int)gid) != 0) _exit(127);
             if (setuid(uid) != 0) _exit(127);
             /* Defence in depth: if we dropped to a non-root uid, regaining root
              * must be impossible; bail out if it somehow is not. */

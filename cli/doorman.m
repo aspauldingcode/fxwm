@@ -31,6 +31,8 @@
 #include <termios.h>
 #include <sys/wait.h>
 #include <libgen.h>
+#include <errno.h>
+#include <limits.h>
 #include "doorman.h"
 
 /* --------------------------------------------------------------------- */
@@ -60,13 +62,26 @@ static char *read_secret(const char *prompt) {
     if (prompt) { fputs(prompt, stderr); fflush(stderr); }
     struct termios oldt, newt;
     bool isTty = (tcgetattr(STDIN_FILENO, &oldt) == 0);
-    if (isTty) { newt = oldt; newt.c_lflag &= ~(unsigned)ECHO; tcsetattr(STDIN_FILENO, TCSANOW, &newt); }
+    if (isTty) { newt = oldt; newt.c_lflag &= ~(tcflag_t)ECHO; tcsetattr(STDIN_FILENO, TCSANOW, &newt); }
     char *line = NULL; size_t cap = 0;
     ssize_t n = getline(&line, &cap, stdin);
     if (isTty) { tcsetattr(STDIN_FILENO, TCSANOW, &oldt); fputc('\n', stdout); }
     if (n <= 0) { free(line); return NULL; }
     if (line[n - 1] == '\n') line[n - 1] = '\0';
     return line;
+}
+
+/* Parse an unsigned decimal id (uid/gid) with full error checking; returns
+ * false for empty, non-numeric, or out-of-range input rather than silently
+ * coercing like atoi() would. */
+static bool parse_id(const char *s, unsigned int *out) {
+    if (!s || !*s) return false;
+    errno = 0;
+    char *end = NULL;
+    unsigned long v = strtoul(s, &end, 10);
+    if (errno != 0 || end == s || *end != '\0' || v > UINT_MAX) return false;
+    *out = (unsigned int)v;
+    return true;
 }
 
 static doorman_backend_t parse_backend(const char *s) {
@@ -127,7 +142,8 @@ static int cmd_authenticate(int argc, char **argv) {
 }
 
 static int cmd_login(int argc, char **argv) {
-    const char *user = NULL, *backend = NULL, *execCmd = NULL, *sessionId = NULL;
+    const char *user = NULL, *backend = NULL, *sessionId = NULL;
+    char *execCmd = NULL;
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--backend") == 0 && i + 1 < argc) backend = argv[++i];
         else if (strcmp(argv[i], "--exec") == 0 && i + 1 < argc) execCmd = argv[++i];
@@ -153,7 +169,7 @@ static int cmd_login(int argc, char **argv) {
     doorman_session_t *chosen = NULL;
     doorman_session_t *sessions = NULL; size_t ns = 0;
     if (execCmd) {
-        adhoc.id = "cli"; adhoc.name = "cli"; adhoc.exec = (char *)execCmd; adhoc.type = "tty";
+        adhoc.id = "cli"; adhoc.name = "cli"; adhoc.exec = execCmd; adhoc.type = "tty";
         chosen = &adhoc;
     } else {
         doorman_enumerate_sessions(&sessions, &ns);
@@ -188,8 +204,8 @@ static int cmd_useradd(int argc, char **argv) {
         const char *a = argv[i];
         if ((strcmp(a, "-m") == 0) || strcmp(a, "--create-home") == 0) spec.create_home = true;
         else if (strcmp(a, "-M") == 0 || strcmp(a, "--no-create-home") == 0) spec.create_home = false;
-        else if ((strcmp(a, "-u") == 0 || strcmp(a, "--uid") == 0) && i + 1 < argc) spec.uid = (uid_t)atoi(argv[++i]);
-        else if ((strcmp(a, "-g") == 0 || strcmp(a, "--gid") == 0) && i + 1 < argc) spec.gid = (gid_t)atoi(argv[++i]);
+        else if ((strcmp(a, "-u") == 0 || strcmp(a, "--uid") == 0) && i + 1 < argc) { unsigned int v; if (parse_id(argv[++i], &v)) spec.uid = (uid_t)v; }
+        else if ((strcmp(a, "-g") == 0 || strcmp(a, "--gid") == 0) && i + 1 < argc) { unsigned int v; if (parse_id(argv[++i], &v)) spec.gid = (gid_t)v; }
         else if ((strcmp(a, "-s") == 0 || strcmp(a, "--shell") == 0) && i + 1 < argc) spec.shell = argv[++i];
         else if ((strcmp(a, "-c") == 0 || strcmp(a, "--comment") == 0) && i + 1 < argc) spec.full_name = argv[++i];
         else if ((strcmp(a, "-d") == 0 || strcmp(a, "--home-dir") == 0) && i + 1 < argc) spec.home = argv[++i];
@@ -261,7 +277,7 @@ static int cmd_passwd(int argc, char **argv) {
 static int cmd_groupadd(int argc, char **argv) {
     const char *name = NULL, *real = NULL; gid_t gid = 0;
     for (int i = 0; i < argc; i++) {
-        if ((strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--gid") == 0) && i + 1 < argc) gid = (gid_t)atoi(argv[++i]);
+        if ((strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--gid") == 0) && i + 1 < argc) { unsigned int v; if (parse_id(argv[++i], &v)) gid = (gid_t)v; }
         else if ((strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--realname") == 0) && i + 1 < argc) real = argv[++i];
         else if (argv[i][0] != '-') name = argv[i];
     }

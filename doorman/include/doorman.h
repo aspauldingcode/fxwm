@@ -32,6 +32,15 @@
 extern "C" {
 #endif
 
+/*
+ * The whole public surface is exported with default ELF/Mach-O visibility even
+ * when the library is compiled with -fvisibility=hidden. Hidden-by-default lets
+ * the build keep every `_dm_*` internal out of the dynamic symbol table, which
+ * shrinks the dylib, speeds up dyld binding, and frees the optimizer to inline
+ * internal calls. Only the symbols between the push/pop below are exported.
+ */
+#pragma GCC visibility push(default)
+
 #define DOORMAN_VERSION_MAJOR 0
 #define DOORMAN_VERSION_MINOR 1
 #define DOORMAN_VERSION_PATCH 0
@@ -401,6 +410,8 @@ doorman_result_t doorman_delete_group(const char *name);
 /* Add/remove a user to/from a group (Linux `usermod -aG` / `gpasswd -d`). */
 doorman_result_t doorman_add_user_to_group(const char *user, const char *group);
 doorman_result_t doorman_remove_user_from_group(const char *user, const char *group);
+
+#pragma GCC visibility pop
 
 #ifdef __cplusplus
 } /* extern "C" */
