@@ -61,6 +61,75 @@
         '';
       };
 
+      # macauth: the standalone macOS authentication framework. Builds a static
+      # archive (for embedding, as fxwm does) and a dylib (for other consumers),
+      # plus the installed public header. arm64e to match the WindowServer ABI.
+      macauthArm64e = pkgsAarch64.stdenvNoCC.mkDerivation {
+        pname = "libmacauth-arm64e";
+        version = "0.1.0";
+        src = ./macauth;
+        __noChroot = true;
+        dontFixup = true;
+        buildPhase = ''
+          # Unset nix SDK-related variables
+          unset SDKROOT
+          unset DEVELOPER_DIR
+          unset NIX_APPLE_SDK_VERSION
+
+          export PATH=/usr/bin:/bin:/usr/sbin
+
+          SRCS="src/macauth.m src/backend_dslocal.m src/backend_opendirectory.m src/backend_pam.m src/users.m src/sessions.m"
+          FRAMEWORKS="-framework Foundation -framework OpenDirectory -framework Security"
+          LIBS="-lpam"
+
+          # Compile each translation unit to an object file.
+          for f in $SRCS; do
+            obj="$(basename "$f" .m).o"
+            xcrun clang -arch arm64e -c -Iinclude "$f" -o "$obj"
+          done
+
+          # Static archive for embedding.
+          xcrun ar rcs libmacauth.a *.o
+
+          # Shared library for dynamic consumers.
+          xcrun clang -arch arm64e -dynamiclib -o libmacauth.dylib \
+            -install_name "@rpath/libmacauth.dylib" \
+            -Iinclude *.o $FRAMEWORKS $LIBS
+        '';
+        installPhase = ''
+          mkdir -p $out/lib $out/include
+          cp libmacauth.a libmacauth.dylib $out/lib/
+          cp include/macauth.h $out/include/
+        '';
+      };
+
+      # Example console "display manager" that consumes libmacauth, showing how
+      # an external login program (e.g. a ported Wayland DM) links the library.
+      macauthExampleArm64e = pkgsAarch64.stdenvNoCC.mkDerivation {
+        pname = "macdm-example-arm64e";
+        version = "0.1.0";
+        src = ./examples/macdm;
+        __noChroot = true;
+        dontFixup = true;
+        buildPhase = ''
+          unset SDKROOT
+          unset DEVELOPER_DIR
+          unset NIX_APPLE_SDK_VERSION
+
+          export PATH=/usr/bin:/bin:/usr/sbin
+          xcrun clang -arch arm64e -o macdm \
+            -I${macauthArm64e}/include \
+            macdm.c \
+            ${macauthArm64e}/lib/libmacauth.a \
+            -framework Foundation -framework OpenDirectory -framework Security \
+            -lpam -lobjc
+        '';
+        installPhase = ''
+          mkdir -p $out/bin
+          cp macdm $out/bin/
+        '';
+      };
+
       # arm64e dylib (with pointer authentication) - uses system clang for arm64e support
       dylibArm64e = pkgsAarch64.stdenvNoCC.mkDerivation {
         pname = "libprotein_render-arm64e";
@@ -78,13 +147,16 @@
           echo "Building from directory: $(pwd)"
           echo "Contents:"
           ls -la
+          # Link libmacauth statically so the compositor stays a single dylib.
           xcrun clang -arch arm64e -dynamiclib -o libprotein_render.dylib \
             -I"$src" \
+            -I${macauthArm64e}/include \
             -I${dobbyArm64e}/include \
             -L${dobbyArm64e}/lib -ldobby \
+            ${macauthArm64e}/lib/libmacauth.a \
             -framework Foundation -framework IOSurface -framework CoreGraphics -framework QuartzCore \
-            -framework Metal -framework CoreServices \
-            -lc++ \
+            -framework Metal -framework CoreServices -framework OpenDirectory -framework Security \
+            -lpam -lc++ \
             libprotein_render.m logonview.m mouse_events.m keyboard_events.m metal_renderer.m ui.m iso_font.c sym.c
         '';
         installPhase = ''
@@ -121,6 +193,8 @@
         default = fxwmArm64e;
         dylib = dylibArm64e;
         dobby = dobbyArm64e;
+        macauth = macauthArm64e;
+        macauth-example = macauthExampleArm64e;
       });
 
       apps = forAllSystems (system: let pkgs = pkgsFor.${system}; in {

@@ -1,8 +1,5 @@
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
-#import <CommonCrypto/CommonCrypto.h>
-#import <CommonCrypto/CommonKeyDerivation.h>
-#import <CommonCrypto/CommonDigest.h>
 #import <objc/runtime.h>
 #import <unistd.h>
 
@@ -11,101 +8,49 @@
 #import "mouse_events.h"
 #import "ui.h"
 
-// Helper to verify PBKDF2-SHA512 hash
-static BOOL VerifyPBKDF2(NSString *password, NSData *entropy, NSData *salt, uint32_t iterations) {
-    if (!entropy || !salt || iterations == 0) return NO;
-
-    NSMutableData *derivedKey = [NSMutableData dataWithLength:entropy.length];
-    int result = CCKeyDerivationPBKDF(
-        kCCPBKDF2,                  // algorithm
-        password.UTF8String,        // password
-        password.length,            // passwordLen
-        salt.bytes,                 // salt
-        salt.length,                // saltLen
-        kCCPRFHmacAlgSHA512,              // PRF
-        iterations,                 // rounds
-        derivedKey.mutableBytes,     // derivedKey
-        derivedKey.length           // derivedKeyLen
-    );
-
-    if (result != kCCSuccess) return NO;
-    return [derivedKey isEqualToData:entropy];
-}
+// Authentication is delegated to the standalone macauth framework. fxwm is now
+// just one consumer of the library; the credential verification, user
+// enumeration and (eventually) session launch all live in libmacauth.
+#import <macauth.h>
 
 Boolean DoLogon(const char* username, const char* password) {
     if (!username || !password) return false;
 
-    @autoreleasepool {
-        NSString *nsUsername = [NSString stringWithUTF8String:username];
-        NSString *nsPassword = [NSString stringWithUTF8String:password];
-
-        // Path to user plist in local nodes
-        NSString *userPlistPath = [NSString stringWithFormat:@"/var/db/dslocal/nodes/Default/users/%@.plist", nsUsername];
-        NSDictionary *userPlist = [NSDictionary dictionaryWithContentsOfFile:userPlistPath];
-
-        if (!userPlist) {
-            NSLog(@"[Protein] DoLogon: Failed to read user plist at %@", userPlistPath);
-            return false;
-        }
-
-        // ShadowHashData is an array of data, first element is a binary plist
-        NSArray *shadowHashArray = userPlist[@"ShadowHashData"];
-        if (!shadowHashArray || shadowHashArray.count == 0) {
-            NSLog(@"[Protein] DoLogon: No ShadowHashData found for %@", nsUsername);
-            return false;
-        }
-
-        NSData *shadowHashData = shadowHashArray[0];
-        NSError *error = nil;
-        NSDictionary *shadowDict = [NSPropertyListSerialization propertyListWithData:shadowHashData
-                                                                           options:NSPropertyListImmutable
-                                                                            format:NULL
-                                                                             error:&error];
-        if (!shadowDict) {
-            NSLog(@"[Protein] DoLogon: Failed to parse ShadowHashData: %@", error);
-            return false;
-        }
-
-        // Modern macOS uses SALTED-SHA512-PBKDF2
-        NSDictionary *pbkdf2Dict = shadowDict[@"SALTED-SHA512-PBKDF2"];
-        if (pbkdf2Dict) {
-            NSData *entropy = pbkdf2Dict[@"entropy"];
-            NSData *salt = pbkdf2Dict[@"salt"];
-            uint32_t iterations = [pbkdf2Dict[@"iterations"] unsignedIntValue];
-
-            if (VerifyPBKDF2(nsPassword, entropy, salt, iterations)) {
-                NSLog(@"[Protein] DoLogon: PBKDF2 Authentication successful for %@", nsUsername);
-                return true;
-            }
-        } else {
-            NSLog(@"[Protein] DoLogon: SALTED-SHA512-PBKDF2 not found in shadow dict");
-        }
-
-        NSLog(@"[Protein] DoLogon: Authentication failed for %@", nsUsername);
-        return false;
+    // AUTO tries OpenDirectory first (covers local + network accounts) and
+    // falls back to the on-disk dsLocal ShadowHashData reader fxwm used to
+    // implement inline.
+    macauth_result_t r = macauth_authenticate_password(username, password,
+                                                       MACAUTH_BACKEND_AUTO);
+    if (r == MACAUTH_SUCCESS) {
+        NSLog(@"[Protein] DoLogon: authentication successful for %s", username);
+        return true;
     }
+    NSLog(@"[Protein] DoLogon: authentication failed for %s (%s)",
+          username, macauth_strerror(r));
+    return false;
 }
 
 static NSString *gSelectedUsername = nil;
 
 NSArray* GetUserList() {
-    NSMutableArray *users = [NSMutableArray array];
-    NSString *path = @"/var/db/dslocal/nodes/Default/users/";
-    NSError *error = nil;
-    NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:path error:&error];
-    
-    if (error) {
-        NSLog(@"[Protein] Failed to read users directory: %@", error);
+    // Ask the library for interactive (login-eligible) accounts. This mirrors
+    // what a Linux display manager gets from getpwent() with the usual
+    // system-account filtering.
+    macauth_user_t *users = NULL;
+    size_t count = 0;
+    macauth_result_t r = macauth_enumerate_users(true, &users, &count);
+    if (r != MACAUTH_SUCCESS || count == 0) {
+        NSLog(@"[Protein] Failed to enumerate users: %s", macauth_strerror(r));
+        if (users) macauth_free_users(users, count);
         return @[@"bedtime"]; // Fallback
     }
-    
-    for (NSString *file in files) {
-        if ([file hasSuffix:@".plist"] && ![file hasPrefix:@"_"]) {
-            NSString *username = [file stringByDeletingPathExtension];
-            [users addObject:username];
-        }
+
+    NSMutableArray *names = [NSMutableArray arrayWithCapacity:count];
+    for (size_t i = 0; i < count; i++) {
+        if (users[i].name) [names addObject:[NSString stringWithUTF8String:users[i].name]];
     }
-    return users;
+    macauth_free_users(users, count);
+    return names;
 }
 
 void CreateLogonView(PVView *gRootView) {
