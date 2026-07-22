@@ -78,7 +78,7 @@
 
           export PATH=/usr/bin:/bin:/usr/sbin
 
-          SRCS="src/doorman.m src/backend_dslocal.m src/backend_opendirectory.m src/backend_pam.m src/users.m src/sessions.m"
+          SRCS="src/doorman.m src/backend_dslocal.m src/backend_opendirectory.m src/backend_pam.m src/users.m src/sessions.m src/provision.m"
           FRAMEWORKS="-framework Foundation -framework OpenDirectory -framework Security"
           LIBS="-lpam"
 
@@ -100,6 +100,37 @@
           mkdir -p $out/lib $out/include
           cp libdoorman.a libdoorman.dylib $out/lib/
           cp include/doorman.h $out/include/
+        '';
+      };
+
+      # Doorman CLI: authentication + Linux-style account management from the
+      # shell. Installs `doorman` plus useradd/userdel/passwd/groupadd/groupdel/
+      # usermod symlinks so Linux account tooling works on macOS via the lib.
+      doormanCliArm64e = pkgsAarch64.stdenvNoCC.mkDerivation {
+        pname = "doorman-cli-arm64e";
+        version = "0.1.0";
+        src = ./cli;
+        __noChroot = true;
+        dontFixup = true;
+        buildPhase = ''
+          unset SDKROOT
+          unset DEVELOPER_DIR
+          unset NIX_APPLE_SDK_VERSION
+
+          export PATH=/usr/bin:/bin:/usr/sbin
+          xcrun clang -arch arm64e -o doorman \
+            -I${doormanArm64e}/include \
+            doorman.m \
+            ${doormanArm64e}/lib/libdoorman.a \
+            -framework Foundation -framework OpenDirectory -framework Security \
+            -lpam -lobjc
+        '';
+        installPhase = ''
+          mkdir -p $out/bin
+          cp doorman $out/bin/
+          for t in useradd userdel passwd groupadd groupdel usermod; do
+            ln -sf doorman $out/bin/$t
+          done
         '';
       };
 
@@ -194,6 +225,7 @@
         dylib = dylibArm64e;
         dobby = dobbyArm64e;
         doorman = doormanArm64e;
+        doorman-cli = doormanCliArm64e;
         doorman-example = doormanExampleArm64e;
       });
 

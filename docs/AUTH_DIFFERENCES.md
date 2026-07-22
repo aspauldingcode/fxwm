@@ -292,6 +292,28 @@ API is intentionally out of scope for a headless login library.
 
 ---
 
+## 14. Account creation & management
+
+| | Linux | macOS |
+|---|---|---|
+| Create a user | `useradd` edits `/etc/passwd`+`/etc/shadow` | `sysadminctl`/`dscl` writes an Open Directory record |
+| Create a home | `useradd -m` copies `/etc/skel` | `createhomedir` copies `/System/Library/User Template` |
+| Set a password | `passwd`/`chpasswd` writes `/etc/shadow` | `passwd`/`dscl -passwd` writes `ShadowHashData` |
+| Create a group | `groupadd` edits `/etc/group` | `dseditgroup` writes an OD group record |
+| Group membership | edit the group line | `dseditgroup -o edit` (UUID-based membership) |
+| Tools | `useradd`, `usermod`, `userdel`, `groupadd`, `gpasswd`, `passwd` | `sysadminctl`, `dscl`, `dseditgroup`, `createhomedir`, `pwpolicy` |
+
+**Bridge:** ✅ Doorman provides a full provisioning API (`doorman_create_user`,
+`doorman_delete_user`, `doorman_set_password`, `doorman_create_home`,
+`doorman_create_group`, `doorman_delete_group`,
+`doorman_add_user_to_group`/`..._remove_...`) plus a CLI that also answers to
+the Linux tool names (`useradd`, `userdel`, `passwd`, `groupadd`, `groupdel`,
+`usermod`). It writes through the canonical macOS substrate (`dscl`,
+`dseditgroup`, `createhomedir`), so accounts it creates are ordinary macOS
+accounts and the stock tools fully interoperate (verified by
+`tests/integration.sh`). New accounts get a proper macOS home from the user
+template. See [`CLI_AND_PROVISIONING.md`](CLI_AND_PROVISIONING.md).
+
 ## Bridge scorecard
 
 | # | Area | Status | doorman surface |
@@ -309,6 +331,7 @@ API is intentionally out of scope for a headless login library.
 | 11 | Network/AD/mobile | ✅ | via `OPENDIRECTORY`/`PAM` backends |
 | 12 | Biometrics/hardware | ⚠️ | `PAM` backend where configured |
 | 13 | Tooling | ✅ (doc) | this document |
+| 14 | Account creation/management | ✅ | provisioning API + CLI (`useradd`/`passwd`/...); writes native OD store |
 
 The framework's guiding rule: **bridge everything that can be bridged behind a
 Linux-shaped API, and honestly surface the handful of macOS realities

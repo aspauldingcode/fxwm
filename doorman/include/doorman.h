@@ -346,6 +346,63 @@ doorman_result_t doorman_open_session(doorman_handle_t *handle,
 /* Mirrors pam_close_session(); tears down session bookkeeping. */
 doorman_result_t doorman_close_session(doorman_handle_t *handle);
 
+/* ------------------------------------------------------------------------- */
+/* MARK: - Account provisioning (users and groups)                           */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Account creation/management. This is the macOS analogue of Linux's
+ * useradd/userdel/groupadd/passwd, letting a caller create and manage accounts
+ * with a Linux-shaped API. It writes through macOS's native account substrate
+ * (Open Directory local node via `dscl`, groups via `dseditgroup`) and creates
+ * home directories from the macOS user template via `createhomedir`, so the
+ * result is a fully valid macOS account that the stock tools (`passwd`, `id`,
+ * `dscl`, Login Window) all see and interoperate with.
+ *
+ * All of these operations modify the local directory and therefore require
+ * root privileges; they return DOORMAN_ERR_PERM otherwise. See
+ * docs/CLI_AND_PROVISIONING.md.
+ */
+
+/* Description of an account to create. Zero/NULL fields take sane defaults. */
+typedef struct doorman_user_spec {
+    const char *name;       /* required: short (login) name                    */
+    const char *full_name;  /* RealName; defaults to name                      */
+    const char *password;   /* initial password; NULL leaves it unset/disabled */
+    const char *home;       /* NFSHomeDirectory; defaults to /Users/<name>     */
+    const char *shell;      /* UserShell; defaults to /bin/zsh                 */
+    uid_t uid;              /* UniqueID; 0 => auto-assign next free >= 501      */
+    gid_t gid;              /* PrimaryGroupID; 0 => 20 (staff)                 */
+    bool admin;            /* also add to the 'admin' group                    */
+    bool hidden;           /* set IsHidden (service/hidden account)            */
+    bool create_home;      /* create the home directory from the macOS template*/
+} doorman_user_spec_t;
+
+/* Create a user account (Linux `useradd`). */
+doorman_result_t doorman_create_user(const doorman_user_spec_t *spec);
+
+/* Delete a user account (Linux `userdel`); optionally remove its home dir. */
+doorman_result_t doorman_delete_user(const char *name, bool remove_home);
+
+/* Set/reset a user's password (Linux `passwd`). As root no old password is
+ * required; this writes the same ShadowHashData the system `passwd` writes. */
+doorman_result_t doorman_set_password(const char *name, const char *new_password);
+
+/* Ensure a user's home directory exists, created from the macOS user template
+ * (wraps `createhomedir`). Idempotent. */
+doorman_result_t doorman_create_home(const char *name);
+
+/* Create a group (Linux `groupadd`). gid 0 => auto-assign. full_name optional. */
+doorman_result_t doorman_create_group(const char *name, gid_t gid,
+                                      const char *full_name);
+
+/* Delete a group (Linux `groupdel`). */
+doorman_result_t doorman_delete_group(const char *name);
+
+/* Add/remove a user to/from a group (Linux `usermod -aG` / `gpasswd -d`). */
+doorman_result_t doorman_add_user_to_group(const char *user, const char *group);
+doorman_result_t doorman_remove_user_from_group(const char *user, const char *group);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

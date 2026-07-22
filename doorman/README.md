@@ -70,13 +70,34 @@ The conversation callback mirrors `struct pam_conv` (styles map 1:1 to
 `PAM_PROMPT_ECHO_OFF` etc.), so a Linux PAM conversation function ports almost
 verbatim. Full documentation is in the header, [`include/doorman.h`](include/doorman.h).
 
+## Account management & CLI
+
+Beyond authentication, Doorman can **create and manage accounts** the way Linux
+does — `doorman_create_user`/`doorman_delete_user`/`doorman_set_password`/
+`doorman_create_group`/`doorman_add_user_to_group`/`doorman_create_home` — and
+ships a `doorman` CLI that also answers to `useradd`, `userdel`, `passwd`,
+`groupadd`, `groupdel`, and `usermod`. It writes through the native macOS store
+(`dscl`/`dseditgroup`/`createhomedir`), so the stock tools (`passwd`, `id`,
+`dscl`) fully interoperate. See
+[`../docs/CLI_AND_PROVISIONING.md`](../docs/CLI_AND_PROVISIONING.md).
+
 ## Building
 
-doorman is exposed as a Nix flake package (arm64e, to match the WindowServer
-ABI that fxwm injects into):
+The plain (non-Nix) build for normal use and CI, via the top-level `Makefile`:
+
+```bash
+make            # libdoorman.a + .dylib, the doorman CLI, macdm, and tests
+make test       # run the unprivileged unit tests
+sudo tests/integration.sh   # full create/login/delete + interop test
+sudo make install           # into /usr/local (lib, header, bin + tool symlinks)
+```
+
+Doorman is also exposed as Nix flake packages (arm64e, to match the
+WindowServer ABI that fxwm injects into):
 
 ```bash
 nix build .#doorman          # static + dylib + header in ./result
+nix build .#doorman-cli      # the doorman CLI + Linux-tool symlinks
 nix build .#doorman-example  # the console demo, ./result/bin/macdm
 ```
 

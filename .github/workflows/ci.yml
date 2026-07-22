@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build-test:
+    name: Build & test (macOS 26)
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          sw_vers
+          uname -m
+          clang --version
+          xcrun --show-sdk-path
+
+      - name: Build (libdoorman + CLI + example + tests)
+        run: make all
+
+      - name: Verify the CLI links against libdoorman and runs
+        run: |
+          ./build/bin/doorman --help
+          # Confirm the framework is actually linked in as a dependency.
+          otool -L ./build/bin/doorman || true
+          ./build/bin/doorman users >/dev/null
+          ./build/bin/doorman sessions
+
+      - name: Unit tests (unprivileged)
+        run: make test
+
+      - name: Integration test (privileged: create / login / interop / delete)
+        run: sudo BINDIR="$PWD/build/bin" ./tests/integration.sh
+
+  verify-headers:
+    name: Header ABI (C & C++)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile-check public header as C11 and C++17
+        run: |
+          printf '#include <doorman.h>\nint main(void){return (int)DOORMAN_SUCCESS;}\n' > /tmp/h.c
+          xcrun clang -std=c11 -Wall -Wextra -Idoorman/include -fsyntax-only /tmp/h.c
+          printf '#include <doorman.h>\nint main(){return (int)DOORMAN_CRED_ESTABLISH;}\n' > /tmp/h.cpp
+          xcrun clang++ -std=c++17 -Wall -Idoorman/include -fsyntax-only /tmp/h.cpp
