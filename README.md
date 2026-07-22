@@ -50,6 +50,8 @@ so you can log in and manage accounts on macOS the way you would on Linux.
   macOS-vs-Linux difference map with a per-area bridge scorecard.
 - [`docs/CLI_AND_PROVISIONING.md`](docs/CLI_AND_PROVISIONING.md) — the CLI,
   provisioning API, and why the stock Unix tools interoperate.
+- [`docs/SECURITY.md`](docs/SECURITY.md) — threat model and the hardening in the
+  auth and provisioning paths.
 
 ## Install a release (no build required)
 

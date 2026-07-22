@@ -1,14 +1,11 @@
 /*
- * backend_pam.m - drive macOS's OpenPAM stack.
+ * backend_pam.m - drive the OpenPAM stack that ships with macOS.
  *
- * macOS ships OpenPAM (since 10.6) with policy files under /etc/pam.d/. This
- * backend is the most faithful "port of the Linux method": it hands control to
- * the PAM stack configured for the service name, so behaviour is whatever the
- * administrator declared in /etc/pam.d/<service> (pam_opendirectory,
- * pam_unix, smartcard modules, etc.).
- *
- * We bridge doorman's conversation to a struct pam_conv so the same credential
- * prompts flow through unchanged.
+ * This is the most faithful "port of the Linux method": control is handed to
+ * whatever /etc/pam.d/<service> declares (pam_opendirectory, pam_unix,
+ * smartcard modules, ...), so behaviour is administrator-configurable without
+ * recompiling. Doorman's conversation is bridged onto a struct pam_conv so the
+ * same credential prompts flow through unchanged.
  */
 
 #import <Foundation/Foundation.h>
@@ -17,8 +14,15 @@
 #include <string.h>
 #include "doorman_internal.h"
 
-/* Translate a PAM message style into a doorman style. */
-static doorman_msg_style_t pam_style_to_doorman(int pam_style) {
+/* The live PAM transaction, kept alive between authenticate/acct/setcred.
+ * pamh MUST be the first member: doorman_end() treats the box as a
+ * pam_handle_t** to release it without knowing this layout. */
+typedef struct {
+    pam_handle_t *pamh;
+    struct pam_conv conv;
+} dm_pam_box;
+
+static doorman_msg_style_t style_from_pam(int pam_style) {
     switch (pam_style) {
         case PAM_PROMPT_ECHO_OFF: return DOORMAN_PROMPT_ECHO_OFF;
         case PAM_PROMPT_ECHO_ON:  return DOORMAN_PROMPT_ECHO_ON;
@@ -28,139 +32,122 @@ static doorman_msg_style_t pam_style_to_doorman(int pam_style) {
     }
 }
 
+static doorman_result_t result_from_pam(int status) {
+    switch (status) {
+        case PAM_SUCCESS:          return DOORMAN_SUCCESS;
+        case PAM_AUTH_ERR:
+        case PAM_CRED_INSUFFICIENT:
+        case PAM_MAXTRIES:         return DOORMAN_ERR_AUTH;
+        case PAM_USER_UNKNOWN:     return DOORMAN_ERR_USER_UNKNOWN;
+        case PAM_ACCT_EXPIRED:
+        case PAM_NEW_AUTHTOK_REQD:
+        case PAM_PERM_DENIED:      return DOORMAN_ERR_ACCT_DISABLED;
+        case PAM_CONV_ERR:         return DOORMAN_ERR_CONV;
+        case PAM_ABORT:            return DOORMAN_ERR_ABORT;
+        default:                   return DOORMAN_ERR_SYSTEM;
+    }
+}
+
 /*
- * PAM conversation shim. appdata_ptr is the doorman_handle_t*. We forward each
- * PAM message to the doorman conversation and copy responses back into
- * PAM-allocated storage (PAM frees resp with free()).
+ * PAM -> doorman conversation bridge. appdata_ptr is the doorman_handle_t. Each
+ * PAM message is translated, forwarded to the application's conversation, and
+ * the replies are copied into PAM-owned storage (PAM frees them with free()).
+ * Every intermediate secret is scrubbed before its buffer is released.
  */
-static int pam_conv_shim(int num_msg,
-                         const struct pam_message **msg,
-                         struct pam_response **resp,
-                         void *appdata_ptr) {
+static int conversation_bridge(int num_msg,
+                               const struct pam_message **msg,
+                               struct pam_response **resp,
+                               void *appdata_ptr) {
     doorman_handle_t *handle = (doorman_handle_t *)appdata_ptr;
     if (!handle || !handle->conv.conv || num_msg <= 0) return PAM_CONV_ERR;
 
-    struct pam_response *replies = calloc((size_t)num_msg, sizeof(*replies));
-    if (!replies) return PAM_BUF_ERR;
-
-    /* Build doorman-shaped messages. */
-    doorman_message_t *mmsgs = calloc((size_t)num_msg, sizeof(*mmsgs));
-    const doorman_message_t **mmsg_ptrs = calloc((size_t)num_msg, sizeof(*mmsg_ptrs));
-    doorman_response_t *mresp = calloc((size_t)num_msg, sizeof(*mresp));
-    doorman_response_t **mresp_ptrs = calloc((size_t)num_msg, sizeof(*mresp_ptrs));
-    if (!mmsgs || !mmsg_ptrs || !mresp || !mresp_ptrs) {
-        free(replies); free(mmsgs); free(mmsg_ptrs); free(mresp); free(mresp_ptrs);
+    struct pam_response *out = calloc((size_t)num_msg, sizeof(*out));
+    doorman_message_t *dmsg = calloc((size_t)num_msg, sizeof(*dmsg));
+    const doorman_message_t **dmsg_ptrs = calloc((size_t)num_msg, sizeof(*dmsg_ptrs));
+    doorman_response_t *dresp = calloc((size_t)num_msg, sizeof(*dresp));
+    doorman_response_t **dresp_ptrs = calloc((size_t)num_msg, sizeof(*dresp_ptrs));
+    if (!out || !dmsg || !dmsg_ptrs || !dresp || !dresp_ptrs) {
+        free(out); free(dmsg); free(dmsg_ptrs); free(dresp); free(dresp_ptrs);
         return PAM_BUF_ERR;
     }
 
     for (int i = 0; i < num_msg; i++) {
-        mmsgs[i].style = pam_style_to_doorman(msg[i]->msg_style);
-        mmsgs[i].msg = msg[i]->msg;
-        mmsg_ptrs[i] = &mmsgs[i];
-        mresp_ptrs[i] = &mresp[i];
+        dmsg[i].style = style_from_pam(msg[i]->msg_style);
+        dmsg[i].msg = msg[i]->msg;
+        dmsg_ptrs[i] = &dmsg[i];
+        dresp_ptrs[i] = &dresp[i];
     }
 
-    int rc = handle->conv.conv(num_msg, mmsg_ptrs, mresp_ptrs, handle->conv.appdata);
+    int rc = handle->conv.conv(num_msg, dmsg_ptrs, dresp_ptrs, handle->conv.appdata);
     if (rc != 0) {
-        for (int i = 0; i < num_msg; i++) {
-            if (mresp[i].resp) { memset(mresp[i].resp, 0, strlen(mresp[i].resp)); free(mresp[i].resp); }
-        }
-        free(replies); free(mmsgs); free(mmsg_ptrs); free(mresp); free(mresp_ptrs);
+        for (int i = 0; i < num_msg; i++)
+            if (dresp[i].resp) _dm_scrub_free(&dresp[i].resp, strlen(dresp[i].resp));
+        free(out); free(dmsg); free(dmsg_ptrs); free(dresp); free(dresp_ptrs);
         return PAM_CONV_ERR;
     }
 
-    /* Copy doorman responses into PAM-owned storage. */
     for (int i = 0; i < num_msg; i++) {
-        if (mresp[i].resp) {
-            replies[i].resp = strdup(mresp[i].resp);
-            replies[i].resp_retcode = 0;
-            memset(mresp[i].resp, 0, strlen(mresp[i].resp));
-            free(mresp[i].resp);
-        } else {
-            replies[i].resp = NULL;
-            replies[i].resp_retcode = 0;
+        if (dresp[i].resp) {
+            out[i].resp = strdup(dresp[i].resp);
+            out[i].resp_retcode = 0;
+            _dm_scrub_free(&dresp[i].resp, strlen(dresp[i].resp));
         }
     }
 
-    free(mmsgs); free(mmsg_ptrs); free(mresp); free(mresp_ptrs);
-    *resp = replies;
+    free(dmsg); free(dmsg_ptrs); free(dresp); free(dresp_ptrs);
+    *resp = out;
     return PAM_SUCCESS;
 }
 
-/* Box holding the live pam handle so acct_mgmt can reuse the auth transaction. */
-typedef struct {
-    pam_handle_t *pamh;
-    struct pam_conv conv;
-} pam_state_t;
-
-static doorman_result_t pam_status_to_doorman(int status) {
-    switch (status) {
-        case PAM_SUCCESS:         return DOORMAN_SUCCESS;
-        case PAM_AUTH_ERR:
-        case PAM_CRED_INSUFFICIENT:
-        case PAM_MAXTRIES:        return DOORMAN_ERR_AUTH;
-        case PAM_USER_UNKNOWN:    return DOORMAN_ERR_USER_UNKNOWN;
-        case PAM_ACCT_EXPIRED:
-        case PAM_NEW_AUTHTOK_REQD:
-        case PAM_PERM_DENIED:     return DOORMAN_ERR_ACCT_DISABLED;
-        case PAM_CONV_ERR:        return DOORMAN_ERR_CONV;
-        case PAM_ABORT:           return DOORMAN_ERR_ABORT;
-        default:                  return DOORMAN_ERR_SYSTEM;
-    }
-}
-
-doorman_result_t _doorman_pam_authenticate(doorman_handle_t *handle) {
+doorman_result_t _dm_pam_authenticate(doorman_handle_t *handle) {
     if (!handle) return DOORMAN_ERR_INVALID_ARG;
     if (!handle->conv.conv) return DOORMAN_ERR_CONV;
 
-    pam_state_t *state = calloc(1, sizeof(*state));
-    if (!state) return DOORMAN_ERR_SYSTEM;
+    dm_pam_box *box = calloc(1, sizeof(*box));
+    if (!box) return DOORMAN_ERR_SYSTEM;
 
-    state->conv.conv = pam_conv_shim;
-    state->conv.appdata_ptr = handle;
+    box->conv.conv = conversation_bridge;
+    box->conv.appdata_ptr = handle;
 
     const char *service = handle->service ? handle->service : "login";
-    int rc = pam_start(service, handle->user, &state->conv, &state->pamh);
+    int rc = pam_start(service, handle->user, &box->conv, &box->pamh);
     if (rc != PAM_SUCCESS) {
-        free(state);
-        return pam_status_to_doorman(rc);
+        free(box);
+        return result_from_pam(rc);
     }
 
-    if (handle->rhost) pam_set_item(state->pamh, PAM_RHOST, handle->rhost);
-    if (handle->tty)   pam_set_item(state->pamh, PAM_TTY, handle->tty);
+    if (handle->rhost) pam_set_item(box->pamh, PAM_RHOST, handle->rhost);
+    if (handle->tty)   pam_set_item(box->pamh, PAM_TTY, handle->tty);
 
-    rc = pam_authenticate(state->pamh, 0);
+    rc = pam_authenticate(box->pamh, 0);
 
-    /* If the user was learned during the conversation, sync it back. */
+    /* Sync back a username that the stack may have learned. */
     const char *pam_user = NULL;
-    if (pam_get_item(state->pamh, PAM_USER, (const void **)&pam_user) == PAM_SUCCESS &&
+    if (pam_get_item(box->pamh, PAM_USER, (const void **)&pam_user) == PAM_SUCCESS &&
         pam_user && !handle->user) {
         handle->user = strdup(pam_user);
     }
 
     if (rc == PAM_SUCCESS) {
-        /* Keep the pam handle alive so acct_mgmt/session can reuse it. */
-        handle->backend_state = state;
+        handle->backend_state = box;   /* keep alive for acct_mgmt/setcred */
     } else {
-        pam_end(state->pamh, rc);
-        free(state);
+        pam_end(box->pamh, rc);
+        free(box);
     }
-    return pam_status_to_doorman(rc);
+    return result_from_pam(rc);
 }
 
-doorman_result_t _doorman_pam_acct_mgmt(doorman_handle_t *handle) {
+doorman_result_t _dm_pam_check_account(doorman_handle_t *handle) {
     if (!handle) return DOORMAN_ERR_INVALID_ARG;
-    pam_state_t *state = (pam_state_t *)handle->backend_state;
-    if (!state || !state->pamh) return DOORMAN_ERR_ABORT;
-
-    int rc = pam_acct_mgmt(state->pamh, 0);
-    return pam_status_to_doorman(rc);
+    dm_pam_box *box = (dm_pam_box *)handle->backend_state;
+    if (!box || !box->pamh) return DOORMAN_ERR_ABORT;
+    return result_from_pam(pam_acct_mgmt(box->pamh, 0));
 }
 
-doorman_result_t _doorman_pam_setcred(doorman_handle_t *handle, int flag) {
+doorman_result_t _dm_pam_setcred(doorman_handle_t *handle, int flag) {
     if (!handle) return DOORMAN_ERR_INVALID_ARG;
-    pam_state_t *state = (pam_state_t *)handle->backend_state;
-    if (!state || !state->pamh) return DOORMAN_ERR_ABORT;
+    dm_pam_box *box = (dm_pam_box *)handle->backend_state;
+    if (!box || !box->pamh) return DOORMAN_ERR_ABORT;
 
     int pam_flag;
     switch (flag) {
@@ -170,7 +157,5 @@ doorman_result_t _doorman_pam_setcred(doorman_handle_t *handle, int flag) {
         case DOORMAN_CRED_ESTABLISH:
         default:                        pam_flag = PAM_ESTABLISH_CRED; break;
     }
-
-    int rc = pam_setcred(state->pamh, pam_flag);
-    return pam_status_to_doorman(rc);
+    return result_from_pam(pam_setcred(box->pamh, pam_flag));
 }

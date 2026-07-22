@@ -1,90 +1,94 @@
 /*
- * backend_opendirectory.m - authentication via the OpenDirectory framework.
+ * backend_opendirectory.m - authentication and password writes via the
+ * OpenDirectory framework.
  *
- * This is the recommended production backend. It uses the same path the macOS
- * login window uses: open the authentication search node, find the user
- * record, and call -verifyPassword:error:. Because it goes through
- * opendirectoryd it transparently handles local, mobile, and network
- * (LDAP/AD) accounts and honors the machine's search policy.
+ * This is the production path: it goes through opendirectoryd exactly as the
+ * macOS login window does, so it transparently covers local, mobile, and
+ * network (LDAP/AD) accounts and honours the machine's search policy. The same
+ * framework is used to write a new password into the local node, which avoids
+ * ever placing a plaintext password on a command line.
  */
 
 #import <Foundation/Foundation.h>
 #import <OpenDirectory/OpenDirectory.h>
 #include "doorman_internal.h"
 
-static doorman_result_t map_od_error(NSError *error, BOOL verified) {
-    if (verified) return DOORMAN_SUCCESS;
-    if (!error) return DOORMAN_ERR_AUTH;
+/* OpenDirectory (ODFrameworkErrors) credential result codes we care about. */
+enum {
+    kDMErrCredentialsInvalid  = 5000,
+    kDMErrAccountDisabled     = 5001,
+    kDMErrAccountInactive     = 5002,
+    kDMErrAccountExpired      = 5003,
+    kDMErrPasswordExpired     = 5004,
+    kDMErrRecordNotFound      = 5300,
+    kDMErrRecordNoLongerValid = 5301,
+};
 
-    /* ODFrameworkErrors: credentials that simply don't match come back as
-     * eODErrorCredentialsInvalid (5000). Anything else is a system/lookup
-     * problem worth surfacing distinctly. */
-    switch (error.code) {
-        case 5000: /* kODErrorCredentialsInvalid */
+/* Fetch a user record from a node of the requested type. Returns nil and sets
+ * *outErr on failure; a nil return with *outErr still nil means "not found". */
+static ODRecord *fetch_record(ODNodeType nodeType, NSString *name, NSError **outErr) {
+    ODSession *session = [ODSession defaultSession];
+    if (!session) return nil;
+
+    ODNode *node = [ODNode nodeWithSession:session type:nodeType error:outErr];
+    if (!node) return nil;
+
+    return [node recordWithRecordType:kODRecordTypeUsers
+                                 name:name
+                           attributes:nil
+                                error:outErr];
+}
+
+static doorman_result_t classify_verify(BOOL verified, NSError *err) {
+    if (verified) return DOORMAN_SUCCESS;
+    switch (err ? err.code : kDMErrCredentialsInvalid) {
+        case kDMErrCredentialsInvalid:
             return DOORMAN_ERR_AUTH;
-        case 5001: /* kODErrorCredentialsAccountDisabled */
-        case 5002: /* kODErrorCredentialsAccountInactive */
-        case 5003: /* kODErrorCredentialsAccountExpired */
-        case 5004: /* kODErrorCredentialsPasswordExpired */
+        case kDMErrAccountDisabled:
+        case kDMErrAccountInactive:
+        case kDMErrAccountExpired:
+        case kDMErrPasswordExpired:
             return DOORMAN_ERR_ACCT_DISABLED;
         default:
             return DOORMAN_ERR_SYSTEM;
     }
 }
 
-static ODRecord *copy_user_record(const char *user, NSError **outError) {
-    NSString *nsUsername = [NSString stringWithUTF8String:user];
-
-    ODSession *session = [ODSession defaultSession];
-    if (!session) return nil;
-
-    ODNode *node = [ODNode nodeWithSession:session
-                                      type:kODNodeTypeAuthentication
-                                     error:outError];
-    if (!node) return nil;
-
-    ODRecord *record = [node recordWithRecordType:kODRecordTypeUsers
-                                             name:nsUsername
-                                       attributes:nil
-                                            error:outError];
-    return record;
-}
-
-doorman_result_t _doorman_verify_opendirectory(const char *user, const char *password) {
+doorman_result_t _dm_verify_opendirectory(const char *user, const char *password) {
     if (!user || !password) return DOORMAN_ERR_INVALID_ARG;
+    if (!_dm_name_ok(user)) return DOORMAN_ERR_USER_UNKNOWN;
 
     @autoreleasepool {
-        NSError *error = nil;
-        ODRecord *record = copy_user_record(user, &error);
-        if (!record) {
-            /* No record => unknown user; other failures are system errors. */
-            if (!error) return DOORMAN_ERR_USER_UNKNOWN;
-            if (error.code == 5301 /* kODErrorRecordNoLongerExists */ ||
-                error.code == 5300 /* record not found variants */) {
-                return DOORMAN_ERR_USER_UNKNOWN;
-            }
-            return DOORMAN_ERR_USER_UNKNOWN;
-        }
+        NSString *name = [NSString stringWithUTF8String:user];
+        NSString *secret = [NSString stringWithUTF8String:password];
+        if (!name || !secret) return DOORMAN_ERR_INVALID_ARG;
 
-        NSString *nsPassword = [NSString stringWithUTF8String:password];
-        error = nil;
-        BOOL ok = [record verifyPassword:nsPassword error:&error];
-        return map_od_error(error, ok);
+        NSError *err = nil;
+        ODRecord *record = fetch_record(kODNodeTypeAuthentication, name, &err);
+        if (!record) return DOORMAN_ERR_USER_UNKNOWN;
+
+        err = nil;
+        BOOL ok = [record verifyPassword:secret error:&err];
+        return classify_verify(ok, err);
     }
 }
 
-doorman_result_t _doorman_acct_mgmt_directory(const char *user) {
+doorman_result_t _dm_account_is_enabled(const char *user) {
     if (!user) return DOORMAN_ERR_INVALID_ARG;
+    if (!_dm_name_ok(user)) return DOORMAN_ERR_USER_UNKNOWN;
 
     @autoreleasepool {
-        NSError *error = nil;
-        ODRecord *record = copy_user_record(user, &error);
+        NSString *name = [NSString stringWithUTF8String:user];
+        if (!name) return DOORMAN_ERR_INVALID_ARG;
+
+        NSError *err = nil;
+        ODRecord *record = fetch_record(kODNodeTypeAuthentication, name, &err);
         if (!record) return DOORMAN_ERR_USER_UNKNOWN;
 
         /* A disabled local account carries a ";DisabledUser;" token in its
-         * AuthenticationAuthority attribute. Treat its presence as disabled. */
+         * AuthenticationAuthority values. */
         NSArray *authority =
-            [record valuesForAttribute:kODAttributeTypeAuthenticationAuthority error:&error];
+            [record valuesForAttribute:kODAttributeTypeAuthenticationAuthority error:&err];
         for (id value in authority) {
             if ([value isKindOfClass:[NSString class]] &&
                 [(NSString *)value rangeOfString:@"DisabledUser"].location != NSNotFound) {
@@ -92,5 +96,27 @@ doorman_result_t _doorman_acct_mgmt_directory(const char *user) {
             }
         }
         return DOORMAN_SUCCESS;
+    }
+}
+
+doorman_result_t _dm_od_set_password(const char *user, const char *new_password) {
+    if (!user || !new_password) return DOORMAN_ERR_INVALID_ARG;
+    if (!_dm_name_ok(user)) return DOORMAN_ERR_USER_UNKNOWN;
+
+    @autoreleasepool {
+        NSString *name = [NSString stringWithUTF8String:user];
+        NSString *secret = [NSString stringWithUTF8String:new_password];
+        if (!name || !secret) return DOORMAN_ERR_INVALID_ARG;
+
+        /* Write into the local node; as root an administrative reset does not
+         * require the old password (pass nil). This establishes the same
+         * ShadowHashData the stock `passwd` writes, with no plaintext on argv. */
+        NSError *err = nil;
+        ODRecord *record = fetch_record(kODNodeTypeLocalNodes, name, &err);
+        if (!record) return DOORMAN_ERR_USER_UNKNOWN;
+
+        err = nil;
+        BOOL ok = [record changePassword:nil toPassword:secret error:&err];
+        return ok ? DOORMAN_SUCCESS : DOORMAN_ERR_SYSTEM;
     }
 }

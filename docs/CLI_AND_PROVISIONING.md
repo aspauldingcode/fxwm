@@ -14,7 +14,8 @@ provisioning writes through the canonical macOS interfaces:
 
 | Operation | What Doorman drives underneath |
 |-----------|--------------------------------|
-| create/delete user, set password | `dscl .` on the local Open Directory node |
+| create/delete user | `dscl .` on the local Open Directory node |
+| set/reset password | the OpenDirectory API (no plaintext on any argv) |
 | create home directory | `createhomedir` (materializes the macOS user template) |
 | create/delete group, membership | `dseditgroup` |
 | authenticate | OpenDirectory / OpenPAM / dsLocal (see the library docs) |
@@ -102,9 +103,24 @@ All provisioning calls require root and return `DOORMAN_ERR_PERM` otherwise.
 
 ## Security notes
 
-- Provisioning shells out to `dscl`/`dseditgroup`/`createhomedir`. Passing a
-  password on a `dscl -passwd` argument makes it briefly visible in the process
-  table; prefer setting/rotating via stdin (`doorman passwd --stdin`) where the
-  password isn't placed on an argv.
+- **Passwords never touch a command line.** Doorman writes passwords through the
+  OpenDirectory API (`ODRecord changePassword:toPassword:`), not `dscl -passwd`,
+  so the plaintext is never visible in the process table (`ps`) of other local
+  users. The CLI reads the password from a no-echo prompt or stdin and scrubs
+  the buffer immediately after use.
+- **Names are validated before use.** Every account/group name is checked
+  against a conservative character set (and rejected if it contains `/`, `..`,
+  a leading `-`/`.`, control characters, or is over-long) before it is
+  interpolated into a record path or passed to a tool. This blocks path
+  traversal in the offline reader and argument smuggling into the tools.
+- **No shell is ever invoked.** Provisioning spawns `dscl`/`dseditgroup`/
+  `createhomedir` via `NSTask` with an explicit argument vector, so there is no
+  shell to inject into.
+- **Home deletion is fenced.** `userdel -r` only removes a home directory that
+  lives under `/Users/` and contains no `..` component.
 - Creating accounts and homes needs root; the API enforces this.
 - These operations mutate real system accounts. Test against throwaway users.
+
+For the full threat model and the authentication-path protections (constant-time
+hash comparison, memory scrubbing, fork-safe session launch), see
+[`SECURITY.md`](SECURITY.md).

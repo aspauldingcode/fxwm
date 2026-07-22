@@ -1,11 +1,11 @@
 /*
  * users.m - directory user enumeration and lookup.
  *
- * On macOS getpwent()/getpwnam() are serviced by opendirectoryd, so they
- * return the same local + cached network accounts the login window would show.
- * This is the macOS analogue of a Linux DM walking getpwent() over
- * /etc/passwd + NSS. Interactive filtering matches Apple's convention of
- * hiding uid < 500 service accounts and names beginning with '_'.
+ * On macOS getpwent()/getpwnam() are backed by opendirectoryd, so they surface
+ * the same local + cached network accounts the login window shows. This is the
+ * macOS analogue of a Linux DM walking getpwent() over /etc/passwd + NSS.
+ * Interactive filtering follows Apple's convention: hide service accounts
+ * (uid < 500), names beginning with '_', and non-login shells.
  */
 
 #import <Foundation/Foundation.h>
@@ -14,28 +14,30 @@
 #include <stdlib.h>
 #include "doorman_internal.h"
 
-static const uid_t kMinInteractiveUID = 500;
+static const uid_t kFirstInteractiveUID = 500;
 
-static bool is_hidden_account(const struct passwd *pw) {
+static bool account_is_hidden(const struct passwd *pw) {
     if (!pw || !pw->pw_name) return true;
-    if (pw->pw_uid != 0 && pw->pw_uid < kMinInteractiveUID) return true;
+    if (pw->pw_uid != 0 && pw->pw_uid < kFirstInteractiveUID) return true;
     if (pw->pw_name[0] == '_') return true;
     if (pw->pw_shell) {
-        if (strcmp(pw->pw_shell, "/usr/bin/false") == 0) return true;
-        if (strcmp(pw->pw_shell, "/sbin/nologin") == 0) return true;
-        if (strcmp(pw->pw_shell, "/usr/bin/nologin") == 0) return true;
+        static const char *const nologin_shells[] = {
+            "/usr/bin/false", "/sbin/nologin", "/usr/bin/nologin", NULL
+        };
+        for (int i = 0; nologin_shells[i]; i++)
+            if (strcmp(pw->pw_shell, nologin_shells[i]) == 0) return true;
     }
     return false;
 }
 
-static void fill_from_passwd(const struct passwd *pw, doorman_user_t *u) {
+static void populate_user(const struct passwd *pw, doorman_user_t *u) {
     u->name = pw->pw_name ? strdup(pw->pw_name) : NULL;
     u->full_name = (pw->pw_gecos && pw->pw_gecos[0]) ? strdup(pw->pw_gecos) : NULL;
     u->home = pw->pw_dir ? strdup(pw->pw_dir) : NULL;
     u->shell = pw->pw_shell ? strdup(pw->pw_shell) : NULL;
     u->uid = pw->pw_uid;
     u->gid = pw->pw_gid;
-    u->hidden = is_hidden_account(pw);
+    u->hidden = account_is_hidden(pw);
 }
 
 doorman_result_t doorman_enumerate_users(bool interactive_only,
@@ -46,26 +48,26 @@ doorman_result_t doorman_enumerate_users(bool interactive_only,
     *count = 0;
 
     size_t cap = 16, n = 0;
-    doorman_user_t *arr = calloc(cap, sizeof(*arr));
-    if (!arr) return DOORMAN_ERR_SYSTEM;
+    doorman_user_t *list = calloc(cap, sizeof(*list));
+    if (!list) return DOORMAN_ERR_SYSTEM;
 
     setpwent();
     struct passwd *pw;
     while ((pw = getpwent()) != NULL) {
-        if (interactive_only && is_hidden_account(pw)) continue;
+        if (interactive_only && account_is_hidden(pw)) continue;
         if (n == cap) {
-            size_t ncap = cap * 2;
-            doorman_user_t *tmp = realloc(arr, ncap * sizeof(*arr));
-            if (!tmp) { endpwent(); doorman_free_users(arr, n); return DOORMAN_ERR_SYSTEM; }
-            arr = tmp;
-            cap = ncap;
+            size_t next = cap * 2;
+            doorman_user_t *grown = realloc(list, next * sizeof(*list));
+            if (!grown) { endpwent(); doorman_free_users(list, n); return DOORMAN_ERR_SYSTEM; }
+            list = grown;
+            cap = next;
         }
-        fill_from_passwd(pw, &arr[n]);
+        populate_user(pw, &list[n]);
         n++;
     }
     endpwent();
 
-    *out = arr;
+    *out = list;
     *count = n;
     return DOORMAN_SUCCESS;
 }
@@ -85,17 +87,17 @@ void doorman_free_user_fields(doorman_user_t *user) {
     memset(user, 0, sizeof(*user));
 }
 
-BOOL _doorman_copy_passwd(const char *name, doorman_user_t *out) {
+BOOL _dm_fill_user_from_passwd(const char *name, doorman_user_t *out) {
     if (!name || !out) return NO;
     struct passwd *pw = getpwnam(name);
     if (!pw) return NO;
-    fill_from_passwd(pw, out);
+    populate_user(pw, out);
     return YES;
 }
 
 doorman_result_t doorman_lookup_user(const char *name, doorman_user_t *out) {
     if (!name || !out) return DOORMAN_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
-    if (!_doorman_copy_passwd(name, out)) return DOORMAN_ERR_USER_UNKNOWN;
+    if (!_dm_fill_user_from_passwd(name, out)) return DOORMAN_ERR_USER_UNKNOWN;
     return DOORMAN_SUCCESS;
 }

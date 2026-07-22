@@ -37,6 +37,16 @@
 /* input helpers                                                         */
 /* --------------------------------------------------------------------- */
 
+/* Overwrite through a volatile pointer so the wipe is not optimised away,
+ * then free. Used for plaintext passwords the CLI briefly holds. */
+static void scrub_free(char *s) {
+    if (!s) return;
+    volatile unsigned char *p = (volatile unsigned char *)s;
+    size_t len = strlen(s);
+    while (len--) *p++ = 0;
+    free(s);
+}
+
 static char *read_line_raw(const char *prompt) {
     if (prompt) { fputs(prompt, stderr); fflush(stderr); }
     char *line = NULL; size_t cap = 0;
@@ -235,14 +245,14 @@ static int cmd_passwd(int argc, char **argv) {
         char *confirm = read_secret("Retype new password: ");
         if (!pw || !confirm || strcmp(pw, confirm) != 0) {
             fprintf(stderr, "passwd: passwords do not match\n");
-            free(pw); free(confirm); return 1;
+            scrub_free(pw); scrub_free(confirm); return 1;
         }
-        free(confirm);
+        scrub_free(confirm);
     }
     if (!pw) { fprintf(stderr, "passwd: no password provided\n"); return 1; }
 
     doorman_result_t r = doorman_set_password(user, pw);
-    memset(pw, 0, strlen(pw)); free(pw);
+    scrub_free(pw);
     if (r != DOORMAN_SUCCESS) { fprintf(stderr, "passwd: %s\n", doorman_strerror(r)); return 1; }
     printf("password updated for %s\n", user);
     return 0;
