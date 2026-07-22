@@ -1,0 +1,48 @@
+# Doorman
+
+> Doorman (`libdoorman`) is a macOS-only C library that ports the Linux login
+> model to macOS: PAM-style authentication transactions with a conversation
+> callback, user/group/session enumeration, privilege-dropping session launch,
+> and Linux-shaped account provisioning (useradd/passwd/groupadd analogues) —
+> all backed by native macOS mechanisms (OpenDirectory, dsLocal ShadowHashData,
+> OpenPAM, dscl/dseditgroup/createhomedir).
+
+Key facts an agent should know before generating code against Doorman:
+
+- Platform: macOS only. Language: C ABI (usable from C, Objective-C, C++,
+  Swift via bridging header, or any FFI). Single header: `doorman/include/doorman.h`.
+- Link line: `-framework Foundation -framework OpenDirectory -framework Security -lpam -lobjc`
+  plus `libdoorman.a` or `libdoorman.dylib`.
+- Every function returns `doorman_result_t`; `DOORMAN_SUCCESS == 0`.
+- Provisioning (create/delete users/groups, set passwords) requires root and
+  returns `DOORMAN_ERR_PERM` otherwise. Verification and enumeration do not.
+- The complete machine-friendly context (full signatures, contracts, recipes)
+  is in `llms-full.txt` at the repository root.
+
+## Docs
+
+- [llms-full.txt](llms-full.txt): the single self-contained context file for
+  LLMs/agents — full API signatures, semantic contracts, memory-ownership
+  rules, error codes, and copy-paste recipes for every capability.
+- [docs/API.md](docs/API.md): human-oriented complete API reference with
+  installation, linking, and worked examples per capability.
+- [doorman/include/doorman.h](doorman/include/doorman.h): the authoritative
+  public header (heavily commented; the source of truth for signatures).
+- [README.md](README.md): project overview, install (prebuilt releases, Nix,
+  make), and quick-start usage.
+- [docs/CLI_AND_PROVISIONING.md](docs/CLI_AND_PROVISIONING.md): the `doorman`
+  CLI and the Linux tool shims (useradd/userdel/passwd/groupadd/groupdel/
+  usermod/gpasswd).
+- [docs/SECURITY.md](docs/SECURITY.md): threat model, secret-scrubbing,
+  name-validation, and privilege-handling guarantees.
+
+## Optional
+
+- [docs/AUTH_DIFFERENCES.md](docs/AUTH_DIFFERENCES.md): exhaustive
+  macOS-vs-Linux authentication difference map with per-area bridge notes.
+- [docs/LINUX_AUTH.md](docs/LINUX_AUTH.md): background on how Linux
+  authenticates users and how Doorman ports that model.
+- [examples/macdm/macdm.c](examples/macdm/macdm.c): minimal console display
+  manager consuming the library end to end.
+- [tests/test_doorman.m](tests/test_doorman.m): unit suite touching every
+  public entry point (useful as behavioural examples).

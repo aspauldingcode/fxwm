@@ -59,6 +59,12 @@ so you can log in and manage accounts on macOS the way you would on Linux.
 - [`docs/SECURITY.md`](docs/SECURITY.md) — threat model and the hardening in the
   auth and provisioning paths.
 
+**For LLMs / coding agents:** [`llms.txt`](llms.txt) (index, follows the
+[llmstxt.org](https://llmstxt.org) convention) and [`llms-full.txt`](llms-full.txt)
+— a single self-contained context file with the full API surface, semantic
+contracts, memory-ownership rules, and copy-paste recipes. Paste `llms-full.txt`
+into an agent's context and it has everything needed to integrate Doorman.
+
 ## Install a release (no build required)
 
 Every tagged release publishes a prebuilt **universal** (Apple Silicon + Intel)

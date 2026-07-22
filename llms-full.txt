@@ -1,0 +1,403 @@
+# Doorman — complete context for LLMs and coding agents
+
+This is a single self-contained document. An agent that has only this file can
+correctly write, review, and debug code that uses Doorman. The authoritative
+source of truth is the public header `doorman/include/doorman.h`; this file
+restates it with the semantic contracts made explicit.
+
+## 1. What Doorman is
+
+Doorman (`libdoorman`) is a macOS-only C library that lets a program:
+
+1. **Authenticate** a macOS user (verify a password) — either one-shot or via a
+   PAM-style transaction with a conversation callback.
+2. **Enumerate** users, resolve their group lists, and discover launchable
+   login sessions (freedesktop `.desktop` entries + the built-in `aqua` entry).
+3. **Open a session** as the authenticated user (privilege drop + login
+   environment + exec), the way a display manager does.
+4. **Provision** accounts: create/delete users and groups, set passwords,
+   manage group membership, create home directories (Linux
+   `useradd`/`passwd`/`groupadd` analogues; requires root).
+
+It exists so Linux-shaped login software (display managers, greeters, account
+tooling) can run on macOS without reimplementing OpenDirectory, dsLocal
+shadow-hash parsing, or `dscl` shell-outs. Accounts it creates are ordinary
+macOS accounts; the stock tools (`id`, `dscl`, `passwd`, Login Window) fully
+interoperate.
+
+Hard constraints:
+
+- macOS only. It will not compile or run on Linux.
+- C ABI. Consumable from C, Objective-C, C++ (header is C11- and C++17-clean),
+  Swift (bridging header/module map), or any FFI (Rust, Go, Python ctypes...).
+- Every API function returns `doorman_result_t`; `DOORMAN_SUCCESS == 0`.
+- All mutation of the account database requires the caller to be root
+  (euid 0); those functions return `DOORMAN_ERR_PERM` otherwise and have no
+  side effects.
+
+## 2. Install and link
+
+Option A — prebuilt universal (arm64+x86_64) release from GitHub Releases:
+`doorman-<version>-macos-universal.tar.gz` containing `lib/libdoorman.{a,dylib}`,
+`include/doorman.h`, `bin/doorman` (+ Linux tool symlinks), `bin/macdm`.
+
+Option B — Nix: `nix build .#doorman` (library), `.#doorman-cli`, `.#dist`.
+
+Option C — make: `make && make test && sudo make install PREFIX=/usr/local`.
+
+Compile and link (the exact required line):
+
+    cc app.c -I<prefix>/include <prefix>/lib/libdoorman.a \
+       -framework Foundation -framework OpenDirectory -framework Security \
+       -lpam -lobjc
+
+Include: `#include <doorman.h>` (or `"doorman.h"`). No other headers required
+beyond standard C headers for your own code.
+
+## 3. Result codes (returned by every function)
+
+    typedef enum doorman_result {
+        DOORMAN_SUCCESS = 0,       // operation completed successfully
+        DOORMAN_ERR_AUTH,          // credentials were rejected
+        DOORMAN_ERR_USER_UNKNOWN,  // no such user
+        DOORMAN_ERR_ACCT_DISABLED, // account exists but cannot log in
+        DOORMAN_ERR_PERM,          // caller lacks privileges (needs root)
+        DOORMAN_ERR_CONV,          // conversation callback failed/aborted
+        DOORMAN_ERR_ABORT,         // transaction is dead / wrong call order
+        DOORMAN_ERR_NO_SESSION,    // no session open / session id not found
+        DOORMAN_ERR_SYSTEM,        // underlying OS/directory error
+        DOORMAN_ERR_INVALID_ARG,   // NULL/invalid argument
+        DOORMAN_ERR_UNSUPPORTED,   // backend does not support the operation
+    } doorman_result_t;
+
+    const char *doorman_strerror(doorman_result_t result);
+    // Static string, never NULL, never freed. Unknown values -> "unknown error".
+
+## 4. Backends
+
+    typedef enum doorman_backend {
+        DOORMAN_BACKEND_AUTO = 0,        // OpenDirectory, falling back to the
+                                         // dsLocal reader only on lookup/system
+                                         // faults (never after a rejected password)
+        DOORMAN_BACKEND_OPENDIRECTORY,   // ODRecord verifyPassword via
+                                         // opendirectoryd; recommended default;
+                                         // covers local + network/mobile accounts
+        DOORMAN_BACKEND_DSLOCAL,         // parse /var/db/dslocal ShadowHashData,
+                                         // verify SALTED-SHA512-PBKDF2 directly;
+                                         // needs root to read the store; works
+                                         // without opendirectoryd
+        DOORMAN_BACKEND_PAM,             // drive /etc/pam.d/<service> via the
+                                         // system OpenPAM; admin-configurable
+    } doorman_backend_t;
+
+Choosing: use `OPENDIRECTORY` (or `AUTO`) in production. Use `DSLOCAL` only in
+early-boot/recovery contexts where opendirectoryd is unavailable (requires
+root). Use `PAM` when the deployment wants `/etc/pam.d` policy control. The
+one-shot helper does not support `PAM` (returns `DOORMAN_ERR_UNSUPPORTED`).
+
+## 5. One-shot authentication (simplest entry point)
+
+    doorman_result_t doorman_authenticate_password(const char *user,
+                                                   const char *password,
+                                                   doorman_backend_t backend);
+
+- Verifies the pair, opens no session, needs no handle or callback.
+- Returns SUCCESS / ERR_AUTH / ERR_USER_UNKNOWN / ERR_SYSTEM / ERR_INVALID_ARG,
+  and ERR_UNSUPPORTED for the PAM backend.
+- Works unprivileged with OPENDIRECTORY/AUTO. DSLOCAL needs root.
+
+Recipe:
+
+    if (doorman_authenticate_password("alice", pw, DOORMAN_BACKEND_AUTO)
+            == DOORMAN_SUCCESS) {
+        /* password is correct */
+    }
+
+## 6. Transactions (the PAM-shaped flow)
+
+Opaque handle: `typedef struct doorman_handle doorman_handle_t;`
+
+    doorman_result_t doorman_start(const char *service,      // NULL => "login"
+                                   const char *user,         // NULL => conversation asks
+                                   const doorman_conv_t *conv,
+                                   doorman_backend_t backend,
+                                   doorman_handle_t **out);
+    void             doorman_end(doorman_handle_t *handle);  // NULL is a no-op
+
+    doorman_result_t doorman_authenticate(doorman_handle_t *h);
+    doorman_result_t doorman_acct_mgmt(doorman_handle_t *h);
+    doorman_result_t doorman_setcred(doorman_handle_t *h, doorman_cred_flag_t flag);
+    doorman_result_t doorman_open_session(doorman_handle_t *h,
+                                          const doorman_session_t *session,
+                                          pid_t *out_pid);
+    doorman_result_t doorman_close_session(doorman_handle_t *h);
+
+Required call order (enforced):
+
+    doorman_start
+      -> doorman_authenticate          (runs the conversation, verifies)
+      -> doorman_acct_mgmt             (ERR_ABORT if called before a successful
+                                        authenticate; checks disabled/expired)
+      -> doorman_setcred(ESTABLISH)    (ERR_ABORT before successful authenticate;
+                                        real pam_setcred for PAM backend,
+                                        documented no-op returning SUCCESS for
+                                        directory backends)
+      -> doorman_open_session          (ERR_ABORT before successful authenticate;
+                                        forks, drops privileges if root, execs)
+      -> waitpid(child)
+      -> doorman_close_session         (ERR_NO_SESSION if none open)
+      -> doorman_end
+
+Items (inspect/update a live handle):
+
+    typedef enum doorman_item {
+        DOORMAN_ITEM_SERVICE = 1, DOORMAN_ITEM_USER = 2,
+        DOORMAN_ITEM_RHOST = 3, DOORMAN_ITEM_TTY = 4,
+    } doorman_item_t;
+    doorman_result_t doorman_set_item(doorman_handle_t*, doorman_item_t, const char *value);
+    doorman_result_t doorman_get_item(doorman_handle_t*, doorman_item_t, const char **value);
+    // get_item yields a BORROWED pointer (do not free); NULL if never set.
+    // RHOST/TTY are forwarded to PAM as PAM_RHOST/PAM_TTY.
+
+Credential flags:
+
+    typedef enum doorman_cred_flag {
+        DOORMAN_CRED_ESTABLISH = 1, DOORMAN_CRED_DELETE = 2,
+        DOORMAN_CRED_REINITIALIZE = 3, DOORMAN_CRED_REFRESH = 4,
+    } doorman_cred_flag_t;
+
+## 7. The conversation callback (credential collection)
+
+Doorman never takes a password parameter in the transaction flow; it calls back:
+
+    typedef enum doorman_msg_style {
+        DOORMAN_PROMPT_ECHO_OFF = 1,  // asking for a password (no echo)
+        DOORMAN_PROMPT_ECHO_ON  = 2,  // asking for a username (echo)
+        DOORMAN_ERROR_MSG       = 3,  // display error text, no input
+        DOORMAN_TEXT_INFO       = 4,  // display info text, no input
+    } doorman_msg_style_t;
+
+    typedef struct doorman_message  { doorman_msg_style_t style; const char *msg; } doorman_message_t;
+    typedef struct doorman_response { char *resp; int resp_retcode; } doorman_response_t;
+
+    typedef int (*doorman_conv_fn)(int num_msg, const doorman_message_t **msg,
+                                   doorman_response_t **resp, void *appdata);
+    typedef struct doorman_conv { doorman_conv_fn conv; void *appdata; } doorman_conv_t;
+
+Contract (critical for correctness):
+
+- For every input-style message, allocate `resp[i]->resp` with `malloc`/`strdup`.
+  Doorman TAKES OWNERSHIP: it scrubs (zero-wipes) and frees each response.
+  Never pass a string literal, stack buffer, or a pointer you keep using.
+- Return 0 on success; any non-zero return aborts with `DOORMAN_ERR_CONV`.
+- If `doorman_start` got `user == NULL`, the conversation receives an extra
+  `DOORMAN_PROMPT_ECHO_ON` message for the username.
+- Values match Linux-PAM's constants, so an existing PAM conv function ports
+  almost verbatim.
+
+Canonical implementation:
+
+    static int my_conv(int n, const doorman_message_t **msg,
+                       doorman_response_t **resp, void *appdata) {
+        (void)appdata;
+        for (int i = 0; i < n; i++) {
+            switch (msg[i]->style) {
+            case DOORMAN_PROMPT_ECHO_OFF: resp[i]->resp = strdup(get_password()); break;
+            case DOORMAN_PROMPT_ECHO_ON:  resp[i]->resp = strdup(get_username()); break;
+            case DOORMAN_ERROR_MSG: fprintf(stderr, "%s\n", msg[i]->msg); break;
+            case DOORMAN_TEXT_INFO: printf("%s\n", msg[i]->msg); break;
+            }
+        }
+        return 0;
+    }
+
+## 8. Users and groups (read-only; no root needed)
+
+    typedef struct doorman_user {
+        char *name, *full_name, *home, *shell;  // heap strings, may be NULL
+        uid_t uid; gid_t gid;
+        bool hidden;                            // system/service account
+    } doorman_user_t;
+
+    doorman_result_t doorman_enumerate_users(bool interactive_only,
+                                             doorman_user_t **out, size_t *count);
+    void             doorman_free_users(doorman_user_t *users, size_t count);
+    doorman_result_t doorman_lookup_user(const char *name, doorman_user_t *out);
+    void             doorman_free_user_fields(doorman_user_t *user);
+    doorman_result_t doorman_get_groups(const char *user, gid_t **gids, size_t *count);
+
+- `interactive_only == true` filters out service accounts (uid < 500,
+  `_`-prefixed names, non-login shells) — i.e. what a login screen shows.
+- `doorman_lookup_user` fills a caller-provided struct; release its members
+  with `doorman_free_user_fields` (not `doorman_free_users`).
+- `doorman_get_groups` returns a heap `gid_t` array (primary gid first);
+  release with plain `free()`.
+
+## 9. Sessions (discovery + launch)
+
+    typedef struct doorman_session {
+        char *id;      // desktop-file basename, or "aqua"
+        char *name;    // Name= from the desktop entry
+        char *comment; // Comment=, may be NULL
+        char *exec;    // Exec= command line
+        char *type;    // "wayland" | "x11" | "aqua"
+    } doorman_session_t;
+
+    doorman_result_t doorman_enumerate_sessions(doorman_session_t **out, size_t *count);
+    void             doorman_free_sessions(doorman_session_t *sessions, size_t count);
+
+- Reads `wayland-sessions/` and `xsessions/` under `$XDG_DATA_DIRS` (defaults
+  to `/usr/local/share:/usr/share`) and always appends the built-in `aqua`
+  entry, so the result is never empty.
+
+`doorman_open_session(h, session, &pid)` (transaction API, see §6):
+
+- Requires a successful `doorman_authenticate` first (`ERR_ABORT` otherwise);
+  `session->exec` and `session->type` must be non-NULL (`ERR_INVALID_ARG`).
+- If the caller is root: forks, drops privileges (`setgid`/`initgroups`/
+  `setuid`), calls `setsid`, sets a minimal login environment (USER, LOGNAME,
+  HOME, SHELL, PATH, XDG_RUNTIME_DIR, XDG_SESSION_TYPE from `session->type`,
+  XDG_SESSION_DESKTOP from `session->id`, and WAYLAND_DISPLAY for wayland
+  sessions), and execs the user's login shell as `<shell> -l -c <exec>`.
+- If the caller is NOT root: it can only launch a session for the current
+  user (useful for development); targeting a different uid returns
+  `DOORMAN_ERR_PERM`.
+- Returns immediately with the child pid in `*out_pid` (if non-NULL). The
+  caller waits on the pid, then calls `doorman_close_session(h)`.
+- A caller may construct its own `doorman_session_t` on the stack (set `id`,
+  `name`, `exec`, `type`) instead of using an enumerated one.
+
+## 10. Provisioning (requires root; Linux useradd/passwd analogues)
+
+    typedef struct doorman_user_spec {
+        const char *name;       // REQUIRED login name
+        const char *full_name;  // default: name
+        const char *password;   // NULL => no password set
+        const char *home;       // default: /Users/<name>
+        const char *shell;      // default: /bin/zsh
+        uid_t uid;              // 0 => auto-assign next free uid >= 501
+        gid_t gid;              // 0 => 20 (staff)
+        bool admin;             // also add to the admin group
+        bool hidden;            // hidden/service account
+        bool create_home;       // create home from the macOS user template
+    } doorman_user_spec_t;
+
+    doorman_result_t doorman_create_user(const doorman_user_spec_t *spec);
+    doorman_result_t doorman_delete_user(const char *name, bool remove_home);
+    doorman_result_t doorman_set_password(const char *name, const char *new_password);
+    doorman_result_t doorman_create_home(const char *name);              // idempotent
+    doorman_result_t doorman_create_group(const char *name, gid_t gid,   // gid 0 => auto
+                                          const char *full_name);        // may be NULL
+    doorman_result_t doorman_delete_group(const char *name);
+    doorman_result_t doorman_add_user_to_group(const char *user, const char *group);
+    doorman_result_t doorman_remove_user_from_group(const char *user, const char *group);
+
+Rules:
+
+- All of these require euid 0; otherwise `DOORMAN_ERR_PERM`, no side effects.
+- Names are strictly validated: only ASCII letters, digits, `.`, `_`, `-`;
+  must not start with `-` or `.`; max 244 chars. Invalid names return
+  `DOORMAN_ERR_INVALID_ARG` before anything is attempted.
+- Passwords are set through the OpenDirectory API, never passed on a command
+  line, so they cannot leak via `ps`.
+- Accounts are ordinary macOS accounts (written via the native store); `id`,
+  `dscl`, `passwd`, System Settings, and Login Window all see them.
+
+Recipe (must run as root):
+
+    doorman_user_spec_t spec = {
+        .name = "builder", .full_name = "CI Builder",
+        .password = "S3cret!", .create_home = true,
+    };
+    doorman_create_user(&spec);
+    doorman_create_group("builders", 0, "Builders");
+    doorman_add_user_to_group("builder", "builders");
+    doorman_set_password("builder", "N3wSecret!");
+    doorman_remove_user_from_group("builder", "builders");
+    doorman_delete_group("builders");
+    doorman_delete_user("builder", /*remove_home=*/true);
+
+## 11. Complete login-flow recipe (display-manager shape)
+
+    #include <doorman.h>
+    #include <sys/wait.h>
+
+    doorman_conv_t conv = { my_conv, NULL };
+    doorman_handle_t *h = NULL;
+    doorman_result_t r = doorman_start("login", username, &conv,
+                                       DOORMAN_BACKEND_OPENDIRECTORY, &h);
+    if (r != DOORMAN_SUCCESS) goto out;
+
+    r = doorman_authenticate(h);                  // prompts via conv
+    if (r != DOORMAN_SUCCESS) goto out;           // ERR_AUTH => wrong password
+    r = doorman_acct_mgmt(h);                     // ERR_ACCT_DISABLED => locked
+    if (r != DOORMAN_SUCCESS) goto out;
+    doorman_setcred(h, DOORMAN_CRED_ESTABLISH);
+
+    doorman_session_t *sessions = NULL; size_t n = 0;
+    doorman_enumerate_sessions(&sessions, &n);
+    pid_t pid = 0;
+    r = doorman_open_session(h, &sessions[choice], &pid);
+    if (r == DOORMAN_SUCCESS) {
+        int status; waitpid(pid, &status, 0);
+        doorman_close_session(h);
+    }
+    doorman_free_sessions(sessions, n);
+    out:
+    if (r != DOORMAN_SUCCESS) fprintf(stderr, "%s\n", doorman_strerror(r));
+    doorman_end(h);
+
+## 12. Memory-ownership rules (exact)
+
+| You got it from | You release it with |
+|---|---|
+| `doorman_start` | `doorman_end` |
+| `doorman_enumerate_users` | `doorman_free_users(arr, count)` |
+| `doorman_lookup_user` (fills your struct) | `doorman_free_user_fields(&u)` |
+| `doorman_enumerate_sessions` | `doorman_free_sessions(arr, count)` |
+| `doorman_get_groups` | `free(gids)` |
+| `doorman_get_item` | nothing — borrowed pointer, do not free |
+| `doorman_strerror` | nothing — static string |
+| conversation `resp[i]->resp` you allocated | nothing — Doorman scrubs + frees it |
+
+## 13. Threading and process rules
+
+- A `doorman_handle_t` must be driven by one thread at a time. Independent
+  handles on different threads are fine.
+- Read-only calls (`enumerate_*`, `lookup_user`, `get_groups`, `strerror`) are
+  reentrant.
+- `doorman_open_session` forks; the child performs only async-signal-safe work
+  before `exec` (the login environment is prebuilt in the parent).
+
+## 14. CLI equivalents (binary: `doorman`)
+
+    doorman authenticate <user>                 verify a password (reads stdin)
+    doorman login <user> [--exec CMD] [--session ID]
+    doorman useradd [-m -u UID -g GID -s SHELL -c GECOS -d HOME -p PW -G GRP --admin --hidden] <name>
+    doorman userdel [-r] <name>
+    doorman passwd [--stdin] <user>
+    doorman groupadd [-g gid] <name>
+    doorman groupdel <name>
+    doorman usermod -aG <group> <user>
+    doorman gpasswd -a|-d <user> <group>
+    doorman users | sessions | groups <user>
+
+The binary also answers directly to the names `useradd`, `userdel`, `passwd`,
+`groupadd`, `groupdel`, `usermod`, `gpasswd` (argv[0] symlinks), so Linux
+account scripts run unchanged.
+
+## 15. Common mistakes to avoid
+
+1. Passing a non-heap string as a conversation response (Doorman frees it).
+2. Freeing the pointer from `doorman_get_item` or `doorman_strerror`.
+3. Calling `acct_mgmt`/`setcred`/`open_session` before a successful
+   `doorman_authenticate` — they return `DOORMAN_ERR_ABORT` by design.
+4. Using `doorman_authenticate_password` with `DOORMAN_BACKEND_PAM` — returns
+   `DOORMAN_ERR_UNSUPPORTED`; PAM requires the transaction + conversation flow.
+5. Expecting provisioning or `DSLOCAL` verification to work without root.
+6. Expecting `doorman_open_session` to switch users when the process is not
+   root — privilege dropping requires starting privileged.
+7. Releasing a `doorman_lookup_user` result with `doorman_free_users` (wrong:
+   that is for enumeration arrays); use `doorman_free_user_fields`.
+8. Forgetting the link frameworks: Foundation, OpenDirectory, Security, plus
+   `-lpam -lobjc`.

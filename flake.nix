@@ -109,9 +109,14 @@
         cp -R ${cli}/bin/. $out/bin/
         cp ${example}/bin/* $out/bin/
         cp ${./doorman/README.md} $out/share/doc/doorman/README.md
+        cp ${./docs/API.md} $out/share/doc/doorman/API.md
+        cp ${./docs/SECURITY.md} $out/share/doc/doorman/SECURITY.md
         cp ${./docs/CLI_AND_PROVISIONING.md} $out/share/doc/doorman/CLI_AND_PROVISIONING.md
         cp ${./docs/AUTH_DIFFERENCES.md} $out/share/doc/doorman/AUTH_DIFFERENCES.md
         cp ${./docs/LINUX_AUTH.md} $out/share/doc/doorman/LINUX_AUTH.md
+        # Agent/LLM-oriented context files (llmstxt.org convention).
+        cp ${./llms.txt} $out/share/doc/doorman/llms.txt
+        cp ${./llms-full.txt} $out/share/doc/doorman/llms-full.txt
         echo "${version}" > $out/VERSION
       '';
     in

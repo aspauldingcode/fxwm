@@ -14,6 +14,9 @@ step with a native macOS mechanism.
 
 - [`../docs/API.md`](../docs/API.md) — the complete API reference: every type
   and function, installation, linking, and worked usage for each capability.
+- [`../llms-full.txt`](../llms-full.txt) — agent/LLM-oriented single-file
+  context: the whole API with contracts and recipes, ready to paste into a
+  coding assistant ([`../llms.txt`](../llms.txt) is the index).
 - [`../docs/LINUX_AUTH.md`](../docs/LINUX_AUTH.md) — how Linux authenticates
   users, and the Linux→macOS mapping that motivates the design.
 - [`../docs/AUTH_DIFFERENCES.md`](../docs/AUTH_DIFFERENCES.md) — the exhaustive

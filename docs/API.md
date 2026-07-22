@@ -4,6 +4,11 @@
 concepts, and every public type and function, with a worked example for each
 capability. The single header to include is [`doorman.h`](../doorman/include/doorman.h).
 
+> Working with an LLM or coding agent? [`llms-full.txt`](../llms-full.txt) at
+> the repository root is a single self-contained version of this reference
+> (full signatures, contracts, ownership rules, recipes) designed to be pasted
+> into an agent's context; [`llms.txt`](../llms.txt) is the index.
+
 - [Installation](#installation)
 - [Linking](#linking)
 - [Core concepts](#core-concepts)
