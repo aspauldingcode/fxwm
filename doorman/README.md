@@ -12,6 +12,8 @@ transaction, run a *conversation* to collect credentials, authenticate,
 validate the account, establish credentials, open a session — and backs each
 step with a native macOS mechanism.
 
+- [`../docs/API.md`](../docs/API.md) — the complete API reference: every type
+  and function, installation, linking, and worked usage for each capability.
 - [`../docs/LINUX_AUTH.md`](../docs/LINUX_AUTH.md) — how Linux authenticates
   users, and the Linux→macOS mapping that motivates the design.
 - [`../docs/AUTH_DIFFERENCES.md`](../docs/AUTH_DIFFERENCES.md) — the exhaustive
@@ -76,7 +78,7 @@ Beyond authentication, Doorman can **create and manage accounts** the way Linux
 does — `doorman_create_user`/`doorman_delete_user`/`doorman_set_password`/
 `doorman_create_group`/`doorman_add_user_to_group`/`doorman_create_home` — and
 ships a `doorman` CLI that also answers to `useradd`, `userdel`, `passwd`,
-`groupadd`, `groupdel`, and `usermod`. It writes through the native macOS store
+`groupadd`, `groupdel`, `usermod`, and `gpasswd`. It writes through the native macOS store
 (`dscl`/`dseditgroup`/`createhomedir`), so the stock tools (`passwd`, `id`,
 `dscl`) fully interoperate. See
 [`../docs/CLI_AND_PROVISIONING.md`](../docs/CLI_AND_PROVISIONING.md).

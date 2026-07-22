@@ -1,5 +1,8 @@
 # Doorman
 
+[![CI](https://github.com/aspauldingcode/fxwm/actions/workflows/ci.yml/badge.svg)](https://github.com/aspauldingcode/fxwm/actions/workflows/ci.yml)
+[![Release](https://github.com/aspauldingcode/fxwm/actions/workflows/release.yml/badge.svg)](https://github.com/aspauldingcode/fxwm/actions/workflows/release.yml)
+
 **A macOS user authentication & account-management framework.**
 
 Doorman lets any program authenticate a macOS user, launch their session, and
@@ -29,7 +32,8 @@ so you can log in and manage accounts on macOS the way you would on Linux.
   through the native store, so the stock tools (`passwd`, `id`, `dscl`) fully
   interoperate.
 - **CLI**: a `doorman` command that also answers to `useradd`, `userdel`,
-  `passwd`, `groupadd`, `groupdel`, and `usermod`, so Linux account scripts work.
+  `passwd`, `groupadd`, `groupdel`, `usermod`, and `gpasswd`, so Linux account
+  scripts work.
 
 ## Layout
 
@@ -50,6 +54,8 @@ so you can log in and manage accounts on macOS the way you would on Linux.
   macOS-vs-Linux difference map with a per-area bridge scorecard.
 - [`docs/CLI_AND_PROVISIONING.md`](docs/CLI_AND_PROVISIONING.md) — the CLI,
   provisioning API, and why the stock Unix tools interoperate.
+- [`docs/API.md`](docs/API.md) — the complete API reference: every type and
+  function, installation, linking, and worked usage for each capability.
 - [`docs/SECURITY.md`](docs/SECURITY.md) — threat model and the hardening in the
   auth and provisioning paths.
 
@@ -110,10 +116,16 @@ cc app.c -I<doorman>/include <doorman>/lib/libdoorman.a \
    -framework Foundation -framework OpenDirectory -framework Security -lpam -lobjc
 ```
 
+The complete reference — every function with parameters, ownership rules, and a
+worked example — is in [`docs/API.md`](docs/API.md).
+
 ## CI & releases
 
 - **CI** (`.github/workflows/ci.yml`) builds the library, CLI, example, and
   tests on a macOS 26 runner, runs the unit + privileged integration tests, and
-  builds the Nix flake.
+  builds the Nix flake. The badge at the top of this README reflects the latest
+  run. The unit suite touches every public `doorman_*` entry point; the
+  integration test exercises the privileged create → login → passwd → groups →
+  delete paths end to end.
 - **Releases** (`.github/workflows/release.yml`) build the flake and publish a
   universal artifact to a GitHub Release automatically when a `v*` tag is pushed.

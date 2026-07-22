@@ -308,7 +308,7 @@ API is intentionally out of scope for a headless login library.
 `doorman_create_group`, `doorman_delete_group`,
 `doorman_add_user_to_group`/`..._remove_...`) plus a CLI that also answers to
 the Linux tool names (`useradd`, `userdel`, `passwd`, `groupadd`, `groupdel`,
-`usermod`). It writes through the canonical macOS substrate (`dscl`,
+`usermod`, `gpasswd`). It writes through the canonical macOS substrate (`dscl`,
 `dseditgroup`, `createhomedir`), so accounts it creates are ordinary macOS
 accounts and the stock tools fully interoperate (verified by
 `tests/integration.sh`). New accounts get a proper macOS home from the user

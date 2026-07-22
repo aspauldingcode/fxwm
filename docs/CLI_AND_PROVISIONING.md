@@ -43,6 +43,7 @@ doorman passwd [--stdin] <user>    set/reset a password
 doorman groupadd [-g gid] <name>   create a group
 doorman groupdel <name>            delete a group
 doorman usermod -aG <group> <user> add a user to a group
+doorman gpasswd -a|-d <user> <group>  add/remove a group member
 doorman users | sessions | groups <user>
 ```
 
@@ -57,7 +58,7 @@ existing Linux account scripts run unchanged. `make install` (and the Nix
 `doorman-cli` package) install these symlinks alongside `doorman`:
 
 ```
-useradd  userdel  passwd  groupadd  groupdel  usermod  ->  doorman
+useradd  userdel  passwd  groupadd  groupdel  usermod  gpasswd  ->  doorman
 ```
 
 So `useradd -m -s /bin/zsh alice` and `passwd alice` work on macOS, backed by
