@@ -47,8 +47,7 @@ macOS is structurally identical here: there is no `/etc/shadow`, but the local
 directory stores a per-user `ShadowHashData` blob whose `SALTED-SHA512-PBKDF2`
 entry is exactly a salt + iteration count + derived key. Verifying a password
 is the same "re-derive with PBKDF2-HMAC-SHA512 and compare" operation. That is
-what `doorman`'s `dslocal` backend does, and it is what fxwm implemented inline
-before this refactor.
+what `doorman`'s `dslocal` backend does.
 
 ## PAM in detail (the part doorman ports)
 

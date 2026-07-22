@@ -1,6 +1,7 @@
 flake.lock
 .cache/
 result
+build/
 .claude/
 .DS_Store
 opencode.json

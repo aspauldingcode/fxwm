@@ -1,7 +1,7 @@
 # Doorman (`libdoorman`)
 
-A PAM-inspired **macOS user authentication framework**, extracted from fxwm so
-that any project can sign a user in to macOS through one stable C ABI.
+A PAM-inspired **macOS user authentication framework** that lets any project
+sign a user in to macOS through one stable C ABI.
 
 The name says what it does: Doorman checks a user's credentials at the door and
 admits them into a session — the authentication backend a login screen or
@@ -31,7 +31,7 @@ Credential verification can use any of:
 |---------|-----------|-------------|
 | `DOORMAN_BACKEND_AUTO` | OpenDirectory, falling back to dsLocal | default; most robust |
 | `DOORMAN_BACKEND_OPENDIRECTORY` | `ODRecord verifyPassword:` via opendirectoryd | production; supports local + network/mobile accounts |
-| `DOORMAN_BACKEND_DSLOCAL` | Parse `ShadowHashData` `SALTED-SHA512-PBKDF2` directly | restricted/early contexts without opendirectoryd (fxwm's original method) |
+| `DOORMAN_BACKEND_DSLOCAL` | Parse `ShadowHashData` `SALTED-SHA512-PBKDF2` directly | restricted/early contexts without opendirectoryd |
 | `DOORMAN_BACKEND_PAM` | Drive macOS's OpenPAM stack (`/etc/pam.d/<service>`) | you want administrator-configurable policy, closest to the Linux method |
 
 ## API at a glance
@@ -92,13 +92,14 @@ sudo tests/integration.sh   # full create/login/delete + interop test
 sudo make install           # into /usr/local (lib, header, bin + tool symlinks)
 ```
 
-Doorman is also exposed as Nix flake packages (arm64e, to match the
-WindowServer ABI that fxwm injects into):
+Doorman is also exposed as Nix flake packages, built **universal**
+(arm64 + x86_64) so one artifact runs on Apple Silicon and Intel Macs:
 
 ```bash
 nix build .#doorman          # static + dylib + header in ./result
 nix build .#doorman-cli      # the doorman CLI + Linux-tool symlinks
 nix build .#doorman-example  # the console demo, ./result/bin/macdm
+nix build .#dist             # the full distributable tree (what releases ship)
 ```
 
 Or compile against it directly on macOS:
@@ -110,8 +111,8 @@ cc yourapp.c -I<doorman>/include \
    -lpam -lobjc
 ```
 
-Produces `libdoorman.a` (for embedding, as fxwm does) and `libdoorman.dylib`
-(for dynamic consumers), plus the installed public header.
+Produces `libdoorman.a` (for embedding) and `libdoorman.dylib` (for dynamic
+consumers), plus the installed public header.
 
 ## Example
 

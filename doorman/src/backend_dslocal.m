@@ -4,9 +4,9 @@
  * This reads the on-disk local directory records under
  * /var/db/dslocal/nodes/Default/users/<name>.plist, extracts the
  * SALTED-SHA512-PBKDF2 entry from ShadowHashData, and verifies a candidate
- * password with PBKDF2-HMAC-SHA512. It is the mechanism fxwm originally shipped
- * as DoLogon(); it needs read access to the shadow store (root) but does not
- * require opendirectoryd, which makes it usable in restricted contexts.
+ * password with PBKDF2-HMAC-SHA512. It needs read access to the shadow store
+ * (root) but does not require opendirectoryd, which makes it usable in
+ * restricted contexts.
  */
 
 #import <Foundation/Foundation.h>

@@ -2,8 +2,8 @@
 #
 # This is the plain (non-Nix) build used by CI and by anyone consuming the
 # framework normally. It builds for the host architecture (arm64 on Apple
-# Silicon) as a standard library, unlike flake.nix which builds arm64e purely
-# so the code can be injected into fxwm's WindowServer.
+# Silicon); flake.nix builds universal (arm64 + x86_64) binaries, which is
+# what tagged releases ship.
 #
 # Targets:
 #   make            build the library, CLI, example, and tests

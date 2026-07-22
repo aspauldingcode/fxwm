@@ -79,8 +79,7 @@ const char *doorman_strerror(doorman_result_t result);
  *                  This is the recommended production backend.
  *  - DSLOCAL       Parse /var/db/dslocal ShadowHashData and verify the
  *                  SALTED-SHA512-PBKDF2 entry directly. No opendirectoryd
- *                  round-trip; useful in restricted/early-boot contexts (this
- *                  is the mechanism fxwm originally used).
+ *                  round-trip; useful in restricted/early-boot contexts.
  *  - PAM           Drive macOS's OpenPAM stack (/etc/pam.d/<service>). This is
  *                  the closest analogue to a Linux login and lets an
  *                  administrator reconfigure policy without recompiling.
@@ -252,8 +251,8 @@ doorman_result_t doorman_get_groups(const char *user,
 
 /*
  * Authenticate a username/password pair without setting up a conversation.
- * This is the direct replacement for fxwm's old DoLogon() and is handy for
- * callers that already have the password in hand. Does not open a session.
+ * Handy for callers that already have the password in hand. Does not open a
+ * session.
  */
 doorman_result_t doorman_authenticate_password(const char *user,
                                                 const char *password,

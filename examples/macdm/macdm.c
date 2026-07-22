@@ -11,8 +11,8 @@
  *   4. launch the chosen session      (doorman_open_session)
  *
  * It is deliberately UI-free (reads from the terminal) so it demonstrates the
- * library contract rather than any particular renderer. fxwm's Metal login
- * screen is another consumer of the exact same API.
+ * library contract rather than any particular renderer. A graphical display
+ * manager would consume the exact same API.
  *
  * Build (on macOS):
  *   cc macdm.c -I../../doorman/include -L<doorman>/lib -ldoorman \
