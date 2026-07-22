@@ -13,10 +13,11 @@
  *   doorman groupadd [-g gid] <name>   create a group
  *   doorman groupdel <name>            delete a group
  *   doorman usermod -aG <grp> <user>   add a user to a group
+ *   doorman gpasswd -a|-d <user> <grp> add/remove a group member
  *   doorman users | sessions | groups <user>
  *
  * When the binary is invoked as `useradd`, `userdel`, `passwd`, `groupadd`,
- * `groupdel`, or `usermod` (e.g. via the symlinks the Makefile installs), it
+ * `groupdel`, `usermod`, or `gpasswd` (via the symlinks the Makefile installs), it
  * behaves as that tool directly, so Linux account-management scripts and
  * habits work on macOS backed by this framework. The stock macOS/Unix tools
  * (`passwd`, `id`, `dscl`, ...) keep working too, since Doorman writes to the
@@ -297,6 +298,27 @@ static int cmd_groupdel(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_gpasswd(int argc, char **argv) {
+    /* gpasswd -a <user> <group>  (add), gpasswd -d <user> <group>  (remove) */
+    const char *user = NULL, *group = NULL;
+    int mode = 0; /* +1 add, -1 remove */
+    for (int i = 0; i < argc; i++) {
+        const char *a = argv[i];
+        if ((strcmp(a, "-a") == 0 || strcmp(a, "--add") == 0) && i + 1 < argc) { user = argv[++i]; mode = 1; }
+        else if ((strcmp(a, "-d") == 0 || strcmp(a, "--delete") == 0) && i + 1 < argc) { user = argv[++i]; mode = -1; }
+        else if (a[0] != '-') group = a;
+    }
+    if (!user || !group || mode == 0) {
+        fprintf(stderr, "usage: doorman gpasswd -a|-d <user> <group>\n"); return 2;
+    }
+    doorman_result_t r = (mode > 0) ? doorman_add_user_to_group(user, group)
+                                    : doorman_remove_user_from_group(user, group);
+    if (r != DOORMAN_SUCCESS) { fprintf(stderr, "gpasswd: %s\n", doorman_strerror(r)); return 1; }
+    printf("%s %s %s group %s\n", mode > 0 ? "added" : "removed", user,
+           mode > 0 ? "to" : "from", group);
+    return 0;
+}
+
 static int cmd_usermod(int argc, char **argv) {
     /* Supports the common `usermod -aG <group> <user>` idiom. */
     const char *group = NULL, *user = NULL;
@@ -355,9 +377,10 @@ static int usage(void) {
         "  groupadd [-g gid] <name>       create a group\n"
         "  groupdel <name>                delete a group\n"
         "  usermod -aG <group> <user>     add a user to a group\n"
+        "  gpasswd -a|-d <user> <group>   add/remove a group member\n"
         "  users | sessions | groups <user>\n\n"
-        "Also runs as useradd/userdel/passwd/groupadd/groupdel/usermod when\n"
-        "invoked under those names.\n");
+        "Also runs as useradd/userdel/passwd/groupadd/groupdel/usermod/gpasswd\n"
+        "when invoked under those names.\n");
     return 2;
 }
 
@@ -371,6 +394,7 @@ static int dispatch(const char *cmd, int argc, char **argv) {
     if (strcmp(cmd, "groupadd") == 0)     return cmd_groupadd(argc, argv);
     if (strcmp(cmd, "groupdel") == 0)     return cmd_groupdel(argc, argv);
     if (strcmp(cmd, "usermod") == 0)      return cmd_usermod(argc, argv);
+    if (strcmp(cmd, "gpasswd") == 0)      return cmd_gpasswd(argc, argv);
     if (strcmp(cmd, "users") == 0)        return cmd_users();
     if (strcmp(cmd, "sessions") == 0)     return cmd_sessions();
     if (strcmp(cmd, "groups") == 0)       return cmd_groups(argc, argv);
@@ -382,7 +406,7 @@ int main(int argc, char **argv) {
     @autoreleasepool {
         char *base = basename(argv[0]);
         /* argv[0]-based Linux-tool compatibility. */
-        static const char *tools[] = {"useradd","userdel","passwd","groupadd","groupdel","usermod",NULL};
+        static const char *tools[] = {"useradd","userdel","passwd","groupadd","groupdel","usermod","gpasswd",NULL};
         for (int i = 0; tools[i]; i++) {
             if (strcmp(base, tools[i]) == 0) {
                 return dispatch(tools[i], argc - 1, argv + 1);

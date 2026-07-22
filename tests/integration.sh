@@ -95,6 +95,17 @@ fi
 "$DOORMAN" usermod -aG "$GROUP_NAME" "$USER_NAME"; check "usermod adds user to group" $?
 dseditgroup -o checkmember -m "$USER_NAME" "$GROUP_NAME" >/dev/null 2>&1; check "system 'dseditgroup' sees membership" $?
 
+# 8b. Remove the membership again (gpasswd -d) and confirm it is gone.
+"$DOORMAN" gpasswd -d "$USER_NAME" "$GROUP_NAME"; check "gpasswd removes membership" $?
+if dseditgroup -o checkmember -m "$USER_NAME" "$GROUP_NAME" >/dev/null 2>&1; then
+  check "membership gone after gpasswd -d" 1
+else
+  check "membership gone after gpasswd -d" 0
+fi
+
+# 8c. Delete the group.
+"$DOORMAN" groupdel "$GROUP_NAME"; check "groupdel removes the group" $?
+
 # 9. Deletion.
 "$DOORMAN" userdel -r "$USER_NAME"; check "userdel removes the account" $?
 if id "$USER_NAME" >/dev/null 2>&1; then check "account gone after userdel" 1; else check "account gone after userdel" 0; fi

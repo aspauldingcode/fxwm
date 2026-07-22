@@ -75,7 +75,7 @@
         installPhase = ''
           mkdir -p $out/bin
           cp doorman $out/bin/
-          for t in useradd userdel passwd groupadd groupdel usermod; do
+          for t in useradd userdel passwd groupadd groupdel usermod gpasswd; do
             ln -sf doorman $out/bin/$t
           done
         '';

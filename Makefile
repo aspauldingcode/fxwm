@@ -44,7 +44,7 @@ LIB_OBJS  := $(patsubst doorman/src/%.m,$(OBJ)/%.o,$(LIB_SRCS))
 STATICLIB := $(LIBDIR)/libdoorman.a
 DYLIB     := $(LIBDIR)/libdoorman.dylib
 
-TOOLLINKS := useradd userdel passwd groupadd groupdel usermod
+TOOLLINKS := useradd userdel passwd groupadd groupdel usermod gpasswd
 
 .PHONY: all lib cli example test install clean
 all: lib cli example tests
