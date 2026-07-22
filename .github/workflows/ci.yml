@@ -35,7 +35,7 @@ jobs:
       - name: Unit tests (unprivileged)
         run: make test
 
-      - name: Integration test (privileged: create / login / interop / delete)
+      - name: "Integration test (privileged: create / login / interop / delete)"
         run: sudo BINDIR="$PWD/build/bin" ./tests/integration.sh
 
   verify-headers:
