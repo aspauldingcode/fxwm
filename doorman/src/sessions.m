@@ -101,10 +101,12 @@ doorman_result_t doorman_enumerate_sessions(doorman_session_t **out,
                     if (!entry || !entry[@"Exec"]) continue;
 
                     [seen addObject:ident];
+                    NSString *displayName = entry[@"Name"] ? entry[@"Name"] : ident;
+                    id comment = entry[@"Comment"] ? entry[@"Comment"] : [NSNull null];
                     [discovered addObject:@{
                         @"id": ident,
-                        @"name": entry[@"Name"] ?: ident,
-                        @"comment": entry[@"Comment"] ?: [NSNull null],
+                        @"name": displayName,
+                        @"comment": comment,
                         @"exec": entry[@"Exec"],
                         @"type": [NSString stringWithUTF8String:kinds[k].type],
                     }];
