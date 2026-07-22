@@ -11,7 +11,7 @@
 
 #import <Foundation/Foundation.h>
 #import <CommonCrypto/CommonKeyDerivation.h>
-#include "macauth_internal.h"
+#include "doorman_internal.h"
 
 static BOOL VerifyPBKDF2(NSString *password,
                          NSData *entropy,
@@ -40,8 +40,8 @@ static BOOL VerifyPBKDF2(NSString *password,
     return diff == 0;
 }
 
-macauth_result_t _macauth_verify_dslocal(const char *user, const char *password) {
-    if (!user || !password) return MACAUTH_ERR_INVALID_ARG;
+doorman_result_t _doorman_verify_dslocal(const char *user, const char *password) {
+    if (!user || !password) return DOORMAN_ERR_INVALID_ARG;
 
     @autoreleasepool {
         NSString *nsUsername = [NSString stringWithUTF8String:user];
@@ -54,16 +54,16 @@ macauth_result_t _macauth_verify_dslocal(const char *user, const char *password)
         if (!userPlist) {
             /* Distinguish "no such user" from "cannot read" (needs root). */
             if (![[NSFileManager defaultManager] fileExistsAtPath:userPlistPath]) {
-                return MACAUTH_ERR_USER_UNKNOWN;
+                return DOORMAN_ERR_USER_UNKNOWN;
             }
-            NSLog(@"[macauth] dslocal: failed to read user plist at %@", userPlistPath);
-            return MACAUTH_ERR_PERM;
+            NSLog(@"[doorman] dslocal: failed to read user plist at %@", userPlistPath);
+            return DOORMAN_ERR_PERM;
         }
 
         NSArray *shadowHashArray = userPlist[@"ShadowHashData"];
         if (!shadowHashArray || shadowHashArray.count == 0) {
-            NSLog(@"[macauth] dslocal: no ShadowHashData for %@", nsUsername);
-            return MACAUTH_ERR_ACCT_DISABLED;
+            NSLog(@"[doorman] dslocal: no ShadowHashData for %@", nsUsername);
+            return DOORMAN_ERR_ACCT_DISABLED;
         }
 
         NSData *shadowHashData = shadowHashArray[0];
@@ -74,14 +74,14 @@ macauth_result_t _macauth_verify_dslocal(const char *user, const char *password)
                                                        format:NULL
                                                         error:&error];
         if (![shadowDict isKindOfClass:[NSDictionary class]]) {
-            NSLog(@"[macauth] dslocal: failed to parse ShadowHashData: %@", error);
-            return MACAUTH_ERR_SYSTEM;
+            NSLog(@"[doorman] dslocal: failed to parse ShadowHashData: %@", error);
+            return DOORMAN_ERR_SYSTEM;
         }
 
         NSDictionary *pbkdf2Dict = shadowDict[@"SALTED-SHA512-PBKDF2"];
         if (![pbkdf2Dict isKindOfClass:[NSDictionary class]]) {
-            NSLog(@"[macauth] dslocal: SALTED-SHA512-PBKDF2 not present for %@", nsUsername);
-            return MACAUTH_ERR_ACCT_DISABLED;
+            NSLog(@"[doorman] dslocal: SALTED-SHA512-PBKDF2 not present for %@", nsUsername);
+            return DOORMAN_ERR_ACCT_DISABLED;
         }
 
         NSData *entropy = pbkdf2Dict[@"entropy"];
@@ -89,8 +89,8 @@ macauth_result_t _macauth_verify_dslocal(const char *user, const char *password)
         uint32_t iterations = [pbkdf2Dict[@"iterations"] unsignedIntValue];
 
         if (VerifyPBKDF2(nsPassword, entropy, salt, iterations)) {
-            return MACAUTH_SUCCESS;
+            return DOORMAN_SUCCESS;
         }
-        return MACAUTH_ERR_AUTH;
+        return DOORMAN_ERR_AUTH;
     }
 }

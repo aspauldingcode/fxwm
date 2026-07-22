@@ -1,6 +1,6 @@
 # macOS vs Linux authentication: the complete difference map
 
-This is the reference that `libmacauth` implements against. It enumerates every
+This is the reference that `libdoorman` implements against. It enumerates every
 axis on which macOS user authentication differs from Linux, states what each
 platform actually does, and records **how the framework bridges the gap** so a
 caller can authenticate on macOS the same way it would on Linux.
@@ -39,7 +39,7 @@ password" to unlocking encrypted material in ways Linux does not.
 | Record shape | fixed 7 colon-separated fields | arbitrary multi-valued attributes (`RecordName`, `RealName`, `UniqueID`, `NFSHomeDirectory`, `UserShell`, `GeneratedUID`, ...) |
 | `getpwnam` source | reads `files`/NSS | serviced by opendirectoryd (there is **no** real `/etc/passwd`; it only holds `root`/`daemon`/`nobody` for single-user boot) |
 
-**Bridge:** ✅ `macauth_enumerate_users` / `macauth_lookup_user` use
+**Bridge:** ✅ `doorman_enumerate_users` / `doorman_lookup_user` use
 `getpwent`/`getpwnam`, which opendirectoryd services on macOS and NSS services
 on Linux — so the caller gets the same `struct passwd`-shaped data on both.
 The multi-valued OD attribute model is only exposed where it matters (account
@@ -85,10 +85,10 @@ Key point: **macOS ships OpenPAM.** `pam_start`/`pam_authenticate`/
 So a PAM-written Linux program can, in principle, keep calling PAM on macOS —
 the stack just resolves to `pam_opendirectory` instead of `pam_unix`.
 
-**Bridge:** ✅ `libmacauth` offers a single conversation-driven API modeled on
+**Bridge:** ✅ `libdoorman` offers a single conversation-driven API modeled on
 PAM, with a `PAM` backend that literally drives macOS's OpenPAM stack (closest
 port), plus `OPENDIRECTORY`/`DSLOCAL` backends for callers that want to skip
-the PAM config surface. The conversation callback (`macauth_conv_t`) is a 1:1
+the PAM config surface. The conversation callback (`doorman_conv_t`) is a 1:1
 analogue of `struct pam_conv` (message styles map to `PAM_PROMPT_ECHO_*`).
 
 ---
@@ -105,7 +105,7 @@ analogue of `struct pam_conv` (message styles map to `PAM_PROMPT_ECHO_*`).
 polkit has **no** macOS equivalent; Authorization Services fills the role but
 with a totally different API and rights model.
 
-**Bridge:** ⚠️ `libmacauth` is an **authentication** framework (the PAM half),
+**Bridge:** ⚠️ `libdoorman` is an **authentication** framework (the PAM half),
 which is what a display manager needs. It deliberately does **not** try to
 emulate polkit or Authorization Services rights; a caller needing "authorize
 this specific privileged action" should use Authorization Services directly.
@@ -124,7 +124,7 @@ On Linux, authenticating and *establishing credentials* are separate steps for
 good reason (Kerberos tickets, keyrings). macOS has the same split conceptually
 but ties it to the login keychain and (on Apple Silicon) SecureToken.
 
-**Bridge:** ✅ `macauth_setcred()` mirrors `pam_setcred`. With the `PAM`
+**Bridge:** ✅ `doorman_setcred()` mirrors `pam_setcred`. With the `PAM`
 backend it calls the real `pam_setcred`, running whatever the `session`/`auth`
 modules configure (including OD credential setup). For the directory backends
 it is a documented, safe no-op that returns success (there is no generic,
@@ -144,9 +144,9 @@ hidden.
 | Notable groups | `wheel`/`sudo` | `admin` (80), `staff` (20), `wheel` (0), `everyone` |
 | NGROUPS | ~65536 (was 16/32) | 16 in the classic API; membership API handles more |
 
-**Bridge:** ✅ `macauth_get_groups` wraps `getgrouplist` (fed by opendirectoryd
+**Bridge:** ✅ `doorman_get_groups` wraps `getgrouplist` (fed by opendirectoryd
 on macOS, NSS on Linux) so a caller gets the same supplementary GID list on
-both. `macauth_open_session` calls `initgroups` before dropping privileges,
+both. `doorman_open_session` calls `initgroups` before dropping privileges,
 matching what a Linux DM does. ⚠️ Deeply nested/computed OD memberships beyond
 what `getgrouplist` returns are not separately expanded.
 
@@ -162,7 +162,7 @@ what `getgrouplist` returns are not separately expanded.
 | `nobody` | 65534 | -2 (4294967294) |
 | Hidden from login | shell = nologin / not in DM filter | `IsHidden=1` attribute, `_`-prefix, or UID < 500 |
 
-**Bridge:** ✅ `macauth_enumerate_users(interactive_only=true)` applies the
+**Bridge:** ✅ `doorman_enumerate_users(interactive_only=true)` applies the
 platform-appropriate filter (UID ≥ 500 threshold, `_`-prefix and nologin shell
 exclusion on macOS) so the "who shows up on the login screen" set matches a
 Linux DM's UID ≥ 1000 filter conceptually.
@@ -178,7 +178,7 @@ Linux DM's UID ≥ 1000 filter conceptually.
 | Failed-login lockout | `pam_faillock` / `pam_tally2` | OD accountPolicy (`maxFailedLoginAttempts`, `minutesUntilFailedAuthenticationReset`) |
 | Password quality | `pam_pwquality`/`pam_cracklib` | OD accountPolicy content rules; `pwpolicy` |
 
-**Bridge:** ⚠️ `macauth_acct_mgmt` checks the `AuthenticationAuthority` for the
+**Bridge:** ⚠️ `doorman_acct_mgmt` checks the `AuthenticationAuthority` for the
 `;DisabledUser;` token (directory backends) and delegates to `pam_acct_mgmt`
 for the PAM backend (which evaluates the full OD account policy). Rich policy
 introspection (days-until-expiry, remaining attempts) is not yet surfaced as
@@ -198,7 +198,7 @@ This category essentially does not exist on Linux and is the deepest source of
 | Hardware-bound keys | TPM (varies) | **Secure Enclave**; keys never leave hardware |
 | Pre-boot auth | separate from login | FileVault pre-boot login *is* an OD auth that then chains to loginwindow |
 
-**Bridge:** ⛔ Not bridgeable by an authentication library alone. `libmacauth`
+**Bridge:** ⛔ Not bridgeable by an authentication library alone. `libdoorman`
 verifies the password (which is the prerequisite), and documents that FileVault
 / SecureToken / keychain unlock are separate macOS subsystems. A full "log in
 like Linux" on FileVault-enabled Apple Silicon must additionally hold a
@@ -219,10 +219,10 @@ silently failing. (`AuthenticationAuthority` exposes whether a user has a
 | Env for GUI session | `XDG_*`, `WAYLAND_DISPLAY`/`DISPLAY` | Aqua uses launchd env; no XDG by default |
 | Session catalog | `.desktop` in `/usr/share/{x,wayland}-sessions` | none (loginwindow starts Aqua); no `.desktop` concept |
 
-**Bridge:** ✅ For the display-manager use case: `macauth_enumerate_sessions`
+**Bridge:** ✅ For the display-manager use case: `doorman_enumerate_sessions`
 reads the same freedesktop `.desktop` directories a Linux DM uses (so a ported
 Wayland DM's session list works unchanged) and adds a synthetic `aqua` entry.
-`macauth_open_session` performs the Linux DM launch dance (fork →
+`doorman_open_session` performs the Linux DM launch dance (fork →
 setgid/initgroups/setuid → build `HOME`/`USER`/`SHELL`/`PATH`/`XDG_RUNTIME_DIR`/
 `XDG_SESSION_TYPE`/`WAYLAND_DISPLAY` → exec). ⚠️ It does **not** register with
 launchd/loginwindow or create a macOS SecuritySession; it launches a session
@@ -237,8 +237,8 @@ a *stock Aqua* login is out of scope (that is loginwindow's job).
 |---|---|---|
 | Modules export env into session | `pam_getenvlist` collects it | OpenPAM has `pam_getenvlist` too, but stock macOS modules export little |
 
-**Bridge:** ⚠️ `macauth_open_session` sets the standard login/XDG variables
-directly. A future `macauth_getenvlist` could forward PAM-exported variables;
+**Bridge:** ⚠️ `doorman_open_session` sets the standard login/XDG variables
+directly. A future `doorman_getenvlist` could forward PAM-exported variables;
 today the session environment is constructed explicitly.
 
 ---
@@ -255,7 +255,7 @@ today the session environment is constructed explicitly.
 
 **Bridge:** ✅ Because the `OPENDIRECTORY` and `PAM` backends go through
 opendirectoryd, network/AD/mobile accounts authenticate through the *same*
-`macauth_authenticate` call with no extra caller code — this is a place macOS's
+`doorman_authenticate` call with no extra caller code — this is a place macOS's
 directory model actually makes the bridge cleaner than Linux's.
 
 ---
@@ -294,18 +294,18 @@ API is intentionally out of scope for a headless login library.
 
 ## Bridge scorecard
 
-| # | Area | Status | macauth surface |
+| # | Area | Status | doorman surface |
 |---|---|---|---|
-| 1 | Identity DB | ✅ | `macauth_enumerate_users`, `macauth_lookup_user` |
+| 1 | Identity DB | ✅ | `doorman_enumerate_users`, `doorman_lookup_user` |
 | 2 | Password hash | ✅ | `DSLOCAL` + `OPENDIRECTORY` backends |
 | 3 | Authn API | ✅ | conversation API + `PAM`/`OPENDIRECTORY`/`DSLOCAL` backends |
 | 4 | Authorization (polkit) | ⚠️/out-of-scope | use Authorization Services directly |
-| 5 | Credential establishment | ✅ | `macauth_setcred` |
-| 6 | Group resolution | ✅ | `macauth_get_groups`, `initgroups` in launch |
+| 5 | Credential establishment | ✅ | `doorman_setcred` |
+| 6 | Group resolution | ✅ | `doorman_get_groups`, `initgroups` in launch |
 | 7 | UID conventions | ✅ | `interactive_only` filtering |
-| 8 | Account policy/lockout | ⚠️ | `macauth_acct_mgmt` (full policy via `PAM`) |
+| 8 | Account policy/lockout | ⚠️ | `doorman_acct_mgmt` (full policy via `PAM`) |
 | 9 | FileVault/keychain/SecureToken | ⛔ | documented; password verified as prerequisite |
-| 10 | Session lifecycle | ✅ (DM) / ⚠️ (Aqua) | `macauth_enumerate_sessions`, `macauth_open_session` |
+| 10 | Session lifecycle | ✅ (DM) / ⚠️ (Aqua) | `doorman_enumerate_sessions`, `doorman_open_session` |
 | 11 | Network/AD/mobile | ✅ | via `OPENDIRECTORY`/`PAM` backends |
 | 12 | Biometrics/hardware | ⚠️ | `PAM` backend where configured |
 | 13 | Tooling | ✅ (doc) | this document |

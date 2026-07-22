@@ -1,5 +1,9 @@
 /*
- * macauth.h - macOS user authentication framework
+ * doorman.h - Doorman, a macOS user authentication framework
+ *
+ * Doorman checks a user's credentials at the door and admits them into a
+ * session: it is the authentication backend a login screen or display manager
+ * relies on to decide who gets in and to launch their session.
  *
  * A PAM-inspired authentication library for macOS. It exposes the same
  * conceptual flow that Linux login stacks use (start a transaction, run a
@@ -17,8 +21,8 @@
  * Swift (via a bridging header/module map) or through FFI from other runtimes.
  */
 
-#ifndef MACAUTH_H
-#define MACAUTH_H
+#ifndef DOORMAN_H
+#define DOORMAN_H
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -28,39 +32,39 @@
 extern "C" {
 #endif
 
-#define MACAUTH_VERSION_MAJOR 0
-#define MACAUTH_VERSION_MINOR 1
-#define MACAUTH_VERSION_PATCH 0
+#define DOORMAN_VERSION_MAJOR 0
+#define DOORMAN_VERSION_MINOR 1
+#define DOORMAN_VERSION_PATCH 0
 
 /* ------------------------------------------------------------------------- */
 /* MARK: - Result codes                                                      */
 /* ------------------------------------------------------------------------- */
 
 /*
- * Result codes returned by every macauth call. These mirror the semantic
+ * Result codes returned by every doorman call. These mirror the semantic
  * distinctions PAM makes (PAM_SUCCESS, PAM_AUTH_ERR, PAM_USER_UNKNOWN,
  * PAM_ACCT_EXPIRED, ...) so that a caller ported from a Linux login stack can
  * map return values one-to-one.
  */
-typedef enum macauth_result {
-    MACAUTH_SUCCESS = 0,       /* operation completed successfully            */
-    MACAUTH_ERR_AUTH,          /* credentials were rejected                   */
-    MACAUTH_ERR_USER_UNKNOWN,  /* no such user in the directory               */
-    MACAUTH_ERR_ACCT_DISABLED, /* account exists but cannot log in            */
-    MACAUTH_ERR_PERM,          /* caller lacks privileges for the operation   */
-    MACAUTH_ERR_CONV,          /* the conversation callback failed/aborted    */
-    MACAUTH_ERR_ABORT,         /* unrecoverable error, transaction is dead    */
-    MACAUTH_ERR_NO_SESSION,    /* requested session id was not found          */
-    MACAUTH_ERR_SYSTEM,        /* underlying OS/directory error               */
-    MACAUTH_ERR_INVALID_ARG,   /* a required argument was NULL/invalid        */
-    MACAUTH_ERR_UNSUPPORTED,   /* backend does not support the operation      */
-} macauth_result_t;
+typedef enum doorman_result {
+    DOORMAN_SUCCESS = 0,       /* operation completed successfully            */
+    DOORMAN_ERR_AUTH,          /* credentials were rejected                   */
+    DOORMAN_ERR_USER_UNKNOWN,  /* no such user in the directory               */
+    DOORMAN_ERR_ACCT_DISABLED, /* account exists but cannot log in            */
+    DOORMAN_ERR_PERM,          /* caller lacks privileges for the operation   */
+    DOORMAN_ERR_CONV,          /* the conversation callback failed/aborted    */
+    DOORMAN_ERR_ABORT,         /* unrecoverable error, transaction is dead    */
+    DOORMAN_ERR_NO_SESSION,    /* requested session id was not found          */
+    DOORMAN_ERR_SYSTEM,        /* underlying OS/directory error               */
+    DOORMAN_ERR_INVALID_ARG,   /* a required argument was NULL/invalid        */
+    DOORMAN_ERR_UNSUPPORTED,   /* backend does not support the operation      */
+} doorman_result_t;
 
 /*
  * Human-readable, static description of a result code. Never returns NULL and
  * the returned string must not be freed. Analogous to pam_strerror().
  */
-const char *macauth_strerror(macauth_result_t result);
+const char *doorman_strerror(doorman_result_t result);
 
 /* ------------------------------------------------------------------------- */
 /* MARK: - Backends                                                          */
@@ -81,12 +85,12 @@ const char *macauth_strerror(macauth_result_t result);
  *                  the closest analogue to a Linux login and lets an
  *                  administrator reconfigure policy without recompiling.
  */
-typedef enum macauth_backend {
-    MACAUTH_BACKEND_AUTO = 0,
-    MACAUTH_BACKEND_OPENDIRECTORY,
-    MACAUTH_BACKEND_DSLOCAL,
-    MACAUTH_BACKEND_PAM,
-} macauth_backend_t;
+typedef enum doorman_backend {
+    DOORMAN_BACKEND_AUTO = 0,
+    DOORMAN_BACKEND_OPENDIRECTORY,
+    DOORMAN_BACKEND_DSLOCAL,
+    DOORMAN_BACKEND_PAM,
+} doorman_backend_t;
 
 /* ------------------------------------------------------------------------- */
 /* MARK: - Conversation (credential collection)                              */
@@ -97,50 +101,50 @@ typedef enum macauth_backend {
  * match Linux-PAM's PAM_PROMPT_ECHO_* / PAM_*_MSG so a PAM conversation
  * function can be reused almost verbatim.
  */
-typedef enum macauth_msg_style {
-    MACAUTH_PROMPT_ECHO_OFF = 1, /* ask for input, do not echo (password)     */
-    MACAUTH_PROMPT_ECHO_ON  = 2, /* ask for input, echo it (username)         */
-    MACAUTH_ERROR_MSG       = 3, /* display an error message, no input        */
-    MACAUTH_TEXT_INFO       = 4, /* display informational text, no input      */
-} macauth_msg_style_t;
+typedef enum doorman_msg_style {
+    DOORMAN_PROMPT_ECHO_OFF = 1, /* ask for input, do not echo (password)     */
+    DOORMAN_PROMPT_ECHO_ON  = 2, /* ask for input, echo it (username)         */
+    DOORMAN_ERROR_MSG       = 3, /* display an error message, no input        */
+    DOORMAN_TEXT_INFO       = 4, /* display informational text, no input      */
+} doorman_msg_style_t;
 
-typedef struct macauth_message {
-    macauth_msg_style_t style;
+typedef struct doorman_message {
+    doorman_msg_style_t style;
     const char *msg;             /* NUL-terminated prompt/message text        */
-} macauth_message_t;
+} doorman_message_t;
 
-typedef struct macauth_response {
-    char *resp;                  /* heap string owned by macauth after return */
+typedef struct doorman_response {
+    char *resp;                  /* heap string owned by doorman after return */
     int   resp_retcode;          /* reserved, set to 0                        */
-} macauth_response_t;
+} doorman_response_t;
 
 /*
  * Conversation callback. Mirrors struct pam_conv's conv().
  *
  * The library calls this to prompt for credentials. For each of the `num_msg`
  * messages the callback must, when the style requests input, allocate a
- * response string with malloc() and store it in resp[i].resp. macauth takes
+ * response string with malloc() and store it in resp[i].resp. doorman takes
  * ownership of those strings and frees them (so it can zero password memory).
  *
  * On success return 0; any non-zero value aborts the transaction with
- * MACAUTH_ERR_CONV.
+ * DOORMAN_ERR_CONV.
  */
-typedef int (*macauth_conv_fn)(int num_msg,
-                               const macauth_message_t **msg,
-                               macauth_response_t **resp,
+typedef int (*doorman_conv_fn)(int num_msg,
+                               const doorman_message_t **msg,
+                               doorman_response_t **resp,
                                void *appdata);
 
-typedef struct macauth_conv {
-    macauth_conv_fn conv;
+typedef struct doorman_conv {
+    doorman_conv_fn conv;
     void *appdata;               /* opaque pointer passed back to conv()      */
-} macauth_conv_t;
+} doorman_conv_t;
 
 /* ------------------------------------------------------------------------- */
 /* MARK: - Transaction lifecycle                                             */
 /* ------------------------------------------------------------------------- */
 
 /* Opaque authentication transaction handle. */
-typedef struct macauth_handle macauth_handle_t;
+typedef struct doorman_handle doorman_handle_t;
 
 /*
  * Begin an authentication transaction. Mirrors pam_start().
@@ -149,40 +153,40 @@ typedef struct macauth_handle macauth_handle_t;
  *            for the PAM backend, and recorded for logging otherwise. May be
  *            NULL to default to "login".
  *   user     Target username, or NULL if not yet known (the conversation may
- *            prompt for it). Can be set later with macauth_set_item().
+ *            prompt for it). Can be set later with doorman_set_item().
  *   conv     Conversation used to collect credentials. May be NULL if you only
  *            ever call the *_password convenience helpers.
  *   backend  Which verification mechanism to use.
- *   out      Receives the new handle on MACAUTH_SUCCESS.
+ *   out      Receives the new handle on DOORMAN_SUCCESS.
  *
- * Free the handle with macauth_end().
+ * Free the handle with doorman_end().
  */
-macauth_result_t macauth_start(const char *service,
+doorman_result_t doorman_start(const char *service,
                                const char *user,
-                               const macauth_conv_t *conv,
-                               macauth_backend_t backend,
-                               macauth_handle_t **out);
+                               const doorman_conv_t *conv,
+                               doorman_backend_t backend,
+                               doorman_handle_t **out);
 
 /* Tear down a transaction and release all associated memory (mirrors pam_end).
  * Passing NULL is a no-op. */
-void macauth_end(macauth_handle_t *handle);
+void doorman_end(doorman_handle_t *handle);
 
 /* Items that can be inspected/updated on a live handle (subset of PAM items). */
-typedef enum macauth_item {
-    MACAUTH_ITEM_SERVICE = 1,
-    MACAUTH_ITEM_USER    = 2,
-    MACAUTH_ITEM_RHOST   = 3, /* remote host, informational                   */
-    MACAUTH_ITEM_TTY     = 4, /* controlling tty / seat, informational        */
-} macauth_item_t;
+typedef enum doorman_item {
+    DOORMAN_ITEM_SERVICE = 1,
+    DOORMAN_ITEM_USER    = 2,
+    DOORMAN_ITEM_RHOST   = 3, /* remote host, informational                   */
+    DOORMAN_ITEM_TTY     = 4, /* controlling tty / seat, informational        */
+} doorman_item_t;
 
-macauth_result_t macauth_set_item(macauth_handle_t *handle,
-                                  macauth_item_t item,
+doorman_result_t doorman_set_item(doorman_handle_t *handle,
+                                  doorman_item_t item,
                                   const char *value);
 
 /* Returns a borrowed pointer valid until the item changes or the handle is
  * freed. *value is set to NULL if the item was never set. */
-macauth_result_t macauth_get_item(macauth_handle_t *handle,
-                                  macauth_item_t item,
+doorman_result_t doorman_get_item(doorman_handle_t *handle,
+                                  doorman_item_t item,
                                   const char **value);
 
 /*
@@ -190,7 +194,7 @@ macauth_result_t macauth_get_item(macauth_handle_t *handle,
  * conversation to obtain the password (and the username, if it was NULL) and
  * checks it against the selected backend.
  */
-macauth_result_t macauth_authenticate(macauth_handle_t *handle);
+doorman_result_t doorman_authenticate(doorman_handle_t *handle);
 
 /*
  * Validate that the authenticated account is allowed to log in right now
@@ -198,17 +202,17 @@ macauth_result_t macauth_authenticate(macauth_handle_t *handle);
  * backends this checks the account's authentication authority / disabled
  * state; for PAM it calls pam_acct_mgmt().
  */
-macauth_result_t macauth_acct_mgmt(macauth_handle_t *handle);
+doorman_result_t doorman_acct_mgmt(doorman_handle_t *handle);
 
 /*
  * Credential establishment flags, mirroring pam_setcred()'s flags.
  */
-typedef enum macauth_cred_flag {
-    MACAUTH_CRED_ESTABLISH    = 1, /* set up user credentials                 */
-    MACAUTH_CRED_DELETE       = 2, /* tear down credentials                   */
-    MACAUTH_CRED_REINITIALIZE = 3, /* fully refresh credentials               */
-    MACAUTH_CRED_REFRESH      = 4, /* extend the lifetime of credentials      */
-} macauth_cred_flag_t;
+typedef enum doorman_cred_flag {
+    DOORMAN_CRED_ESTABLISH    = 1, /* set up user credentials                 */
+    DOORMAN_CRED_DELETE       = 2, /* tear down credentials                   */
+    DOORMAN_CRED_REINITIALIZE = 3, /* fully refresh credentials               */
+    DOORMAN_CRED_REFRESH      = 4, /* extend the lifetime of credentials      */
+} doorman_cred_flag_t;
 
 /*
  * Establish (or tear down) the authenticated user's credentials. Mirrors
@@ -218,15 +222,15 @@ typedef enum macauth_cred_flag {
  *
  * With the PAM backend this calls the real pam_setcred() and therefore runs
  * whatever the configured stack does. With the directory backends it is a
- * safe no-op returning MACAUTH_SUCCESS: there is no supported way to unlock a
+ * safe no-op returning DOORMAN_SUCCESS: there is no supported way to unlock a
  * *different* user's login keychain from outside that user's security session,
  * so credential material that depends on the plaintext password must be
  * established inside the launched session. See docs/AUTH_DIFFERENCES.md §5, §9.
  *
- * Must be called after a successful macauth_authenticate().
+ * Must be called after a successful doorman_authenticate().
  */
-macauth_result_t macauth_setcred(macauth_handle_t *handle,
-                                 macauth_cred_flag_t flag);
+doorman_result_t doorman_setcred(doorman_handle_t *handle,
+                                 doorman_cred_flag_t flag);
 
 /*
  * Resolve the supplementary group id list for a user, the way a login program
@@ -238,7 +242,7 @@ macauth_result_t macauth_setcred(macauth_handle_t *handle,
  * gid is included first); free it with free(). If the user has more groups
  * than a reasonable buffer, the list is still returned fully.
  */
-macauth_result_t macauth_get_groups(const char *user,
+doorman_result_t doorman_get_groups(const char *user,
                                     gid_t **gids,
                                     size_t *count);
 
@@ -251,9 +255,9 @@ macauth_result_t macauth_get_groups(const char *user,
  * This is the direct replacement for fxwm's old DoLogon() and is handy for
  * callers that already have the password in hand. Does not open a session.
  */
-macauth_result_t macauth_authenticate_password(const char *user,
+doorman_result_t doorman_authenticate_password(const char *user,
                                                 const char *password,
-                                                macauth_backend_t backend);
+                                                doorman_backend_t backend);
 
 /* ------------------------------------------------------------------------- */
 /* MARK: - User enumeration                                                  */
@@ -261,9 +265,9 @@ macauth_result_t macauth_authenticate_password(const char *user,
 
 /*
  * A directory user, analogous to a struct passwd entry a Linux DM would read
- * from getpwent(). All strings are heap-owned and freed by macauth_free_users.
+ * from getpwent(). All strings are heap-owned and freed by doorman_free_users.
  */
-typedef struct macauth_user {
+typedef struct doorman_user {
     char  *name;      /* short/record name (login name)                       */
     char  *full_name; /* display / GECOS name, may be NULL                    */
     char  *home;      /* home directory, may be NULL                          */
@@ -271,7 +275,7 @@ typedef struct macauth_user {
     uid_t  uid;
     gid_t  gid;
     bool   hidden;    /* system/service account not normally shown at login   */
-} macauth_user_t;
+} doorman_user_t;
 
 /*
  * Enumerate directory users. If `interactive_only` is true, hidden/system
@@ -279,18 +283,18 @@ typedef struct macauth_user {
  * are filtered out, matching what a login screen would display.
  *
  * On success *out points to a heap array of `*count` entries; free it with
- * macauth_free_users().
+ * doorman_free_users().
  */
-macauth_result_t macauth_enumerate_users(bool interactive_only,
-                                         macauth_user_t **out,
+doorman_result_t doorman_enumerate_users(bool interactive_only,
+                                         doorman_user_t **out,
                                          size_t *count);
 
-void macauth_free_users(macauth_user_t *users, size_t count);
+void doorman_free_users(doorman_user_t *users, size_t count);
 
 /* Look up a single user by name. Fills a caller-provided struct whose members
- * must be released with macauth_free_user_fields(). */
-macauth_result_t macauth_lookup_user(const char *name, macauth_user_t *out);
-void macauth_free_user_fields(macauth_user_t *user);
+ * must be released with doorman_free_user_fields(). */
+doorman_result_t doorman_lookup_user(const char *name, doorman_user_t *out);
+void doorman_free_user_fields(doorman_user_t *user);
 
 /* ------------------------------------------------------------------------- */
 /* MARK: - Session discovery and launch                                      */
@@ -299,33 +303,33 @@ void macauth_free_user_fields(macauth_user_t *user);
 /*
  * A selectable session, analogous to the freedesktop .desktop entries a Linux
  * display manager reads from /usr/share/xsessions and
- * /usr/share/wayland-sessions. macauth discovers these same directories so a
+ * /usr/share/wayland-sessions. doorman discovers these same directories so a
  * ported display manager keeps working, and also synthesizes a built-in
  * "aqua" entry for the stock macOS session.
  */
-typedef struct macauth_session {
+typedef struct doorman_session {
     char *id;      /* stable id (desktop file basename, or "aqua")           */
     char *name;    /* human-readable Name= from the desktop entry            */
     char *comment; /* Comment= description, may be NULL                      */
     char *exec;    /* Exec= command line to launch the session               */
     char *type;    /* "wayland", "x11", or "aqua"                            */
-} macauth_session_t;
+} doorman_session_t;
 
 /*
  * Discover available sessions. Reads the standard freedesktop session
  * directories (honoring $XDG_DATA_DIRS) plus the built-in aqua session.
- * Free with macauth_free_sessions().
+ * Free with doorman_free_sessions().
  */
-macauth_result_t macauth_enumerate_sessions(macauth_session_t **out,
+doorman_result_t doorman_enumerate_sessions(doorman_session_t **out,
                                             size_t *count);
 
-void macauth_free_sessions(macauth_session_t *sessions, size_t count);
+void doorman_free_sessions(doorman_session_t *sessions, size_t count);
 
 /*
  * Open a session for the authenticated user and launch `session`. Mirrors
  * pam_open_session() followed by the display manager fork/exec.
  *
- * This must be called after a successful macauth_authenticate(). When the
+ * This must be called after a successful doorman_authenticate(). When the
  * caller is running as root it drops privileges to the target user (setgid,
  * initgroups, setuid), establishes a minimal login environment (HOME, USER,
  * LOGNAME, SHELL, PATH and the XDG_* variables a Wayland session expects) and
@@ -333,17 +337,17 @@ void macauth_free_sessions(macauth_session_t *sessions, size_t count);
  *
  * On success the child pid is written to *out_pid (if non-NULL) and the
  * function returns immediately; the caller is expected to wait on the pid and
- * later call macauth_close_session().
+ * later call doorman_close_session().
  */
-macauth_result_t macauth_open_session(macauth_handle_t *handle,
-                                      const macauth_session_t *session,
+doorman_result_t doorman_open_session(doorman_handle_t *handle,
+                                      const doorman_session_t *session,
                                       pid_t *out_pid);
 
 /* Mirrors pam_close_session(); tears down session bookkeeping. */
-macauth_result_t macauth_close_session(macauth_handle_t *handle);
+doorman_result_t doorman_close_session(doorman_handle_t *handle);
 
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
 
-#endif /* MACAUTH_H */
+#endif /* DOORMAN_H */

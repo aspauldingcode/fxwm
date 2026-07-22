@@ -8,10 +8,10 @@
 #import "mouse_events.h"
 #import "ui.h"
 
-// Authentication is delegated to the standalone macauth framework. fxwm is now
+// Authentication is delegated to the standalone doorman framework. fxwm is now
 // just one consumer of the library; the credential verification, user
-// enumeration and (eventually) session launch all live in libmacauth.
-#import <macauth.h>
+// enumeration and (eventually) session launch all live in libdoorman.
+#import <doorman.h>
 
 Boolean DoLogon(const char* username, const char* password) {
     if (!username || !password) return false;
@@ -19,14 +19,14 @@ Boolean DoLogon(const char* username, const char* password) {
     // AUTO tries OpenDirectory first (covers local + network accounts) and
     // falls back to the on-disk dsLocal ShadowHashData reader fxwm used to
     // implement inline.
-    macauth_result_t r = macauth_authenticate_password(username, password,
-                                                       MACAUTH_BACKEND_AUTO);
-    if (r == MACAUTH_SUCCESS) {
+    doorman_result_t r = doorman_authenticate_password(username, password,
+                                                       DOORMAN_BACKEND_AUTO);
+    if (r == DOORMAN_SUCCESS) {
         NSLog(@"[Protein] DoLogon: authentication successful for %s", username);
         return true;
     }
     NSLog(@"[Protein] DoLogon: authentication failed for %s (%s)",
-          username, macauth_strerror(r));
+          username, doorman_strerror(r));
     return false;
 }
 
@@ -36,12 +36,12 @@ NSArray* GetUserList() {
     // Ask the library for interactive (login-eligible) accounts. This mirrors
     // what a Linux display manager gets from getpwent() with the usual
     // system-account filtering.
-    macauth_user_t *users = NULL;
+    doorman_user_t *users = NULL;
     size_t count = 0;
-    macauth_result_t r = macauth_enumerate_users(true, &users, &count);
-    if (r != MACAUTH_SUCCESS || count == 0) {
-        NSLog(@"[Protein] Failed to enumerate users: %s", macauth_strerror(r));
-        if (users) macauth_free_users(users, count);
+    doorman_result_t r = doorman_enumerate_users(true, &users, &count);
+    if (r != DOORMAN_SUCCESS || count == 0) {
+        NSLog(@"[Protein] Failed to enumerate users: %s", doorman_strerror(r));
+        if (users) doorman_free_users(users, count);
         return @[@"bedtime"]; // Fallback
     }
 
@@ -49,7 +49,7 @@ NSArray* GetUserList() {
     for (size_t i = 0; i < count; i++) {
         if (users[i].name) [names addObject:[NSString stringWithUTF8String:users[i].name]];
     }
-    macauth_free_users(users, count);
+    doorman_free_users(users, count);
     return names;
 }
 

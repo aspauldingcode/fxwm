@@ -61,13 +61,13 @@
         '';
       };
 
-      # macauth: the standalone macOS authentication framework. Builds a static
+      # doorman: the standalone macOS authentication framework. Builds a static
       # archive (for embedding, as fxwm does) and a dylib (for other consumers),
       # plus the installed public header. arm64e to match the WindowServer ABI.
-      macauthArm64e = pkgsAarch64.stdenvNoCC.mkDerivation {
-        pname = "libmacauth-arm64e";
+      doormanArm64e = pkgsAarch64.stdenvNoCC.mkDerivation {
+        pname = "libdoorman-arm64e";
         version = "0.1.0";
-        src = ./macauth;
+        src = ./doorman;
         __noChroot = true;
         dontFixup = true;
         buildPhase = ''
@@ -78,7 +78,7 @@
 
           export PATH=/usr/bin:/bin:/usr/sbin
 
-          SRCS="src/macauth.m src/backend_dslocal.m src/backend_opendirectory.m src/backend_pam.m src/users.m src/sessions.m"
+          SRCS="src/doorman.m src/backend_dslocal.m src/backend_opendirectory.m src/backend_pam.m src/users.m src/sessions.m"
           FRAMEWORKS="-framework Foundation -framework OpenDirectory -framework Security"
           LIBS="-lpam"
 
@@ -89,23 +89,23 @@
           done
 
           # Static archive for embedding.
-          xcrun ar rcs libmacauth.a *.o
+          xcrun ar rcs libdoorman.a *.o
 
           # Shared library for dynamic consumers.
-          xcrun clang -arch arm64e -dynamiclib -o libmacauth.dylib \
-            -install_name "@rpath/libmacauth.dylib" \
+          xcrun clang -arch arm64e -dynamiclib -o libdoorman.dylib \
+            -install_name "@rpath/libdoorman.dylib" \
             -Iinclude *.o $FRAMEWORKS $LIBS
         '';
         installPhase = ''
           mkdir -p $out/lib $out/include
-          cp libmacauth.a libmacauth.dylib $out/lib/
-          cp include/macauth.h $out/include/
+          cp libdoorman.a libdoorman.dylib $out/lib/
+          cp include/doorman.h $out/include/
         '';
       };
 
-      # Example console "display manager" that consumes libmacauth, showing how
+      # Example console "display manager" that consumes libdoorman, showing how
       # an external login program (e.g. a ported Wayland DM) links the library.
-      macauthExampleArm64e = pkgsAarch64.stdenvNoCC.mkDerivation {
+      doormanExampleArm64e = pkgsAarch64.stdenvNoCC.mkDerivation {
         pname = "macdm-example-arm64e";
         version = "0.1.0";
         src = ./examples/macdm;
@@ -118,9 +118,9 @@
 
           export PATH=/usr/bin:/bin:/usr/sbin
           xcrun clang -arch arm64e -o macdm \
-            -I${macauthArm64e}/include \
+            -I${doormanArm64e}/include \
             macdm.c \
-            ${macauthArm64e}/lib/libmacauth.a \
+            ${doormanArm64e}/lib/libdoorman.a \
             -framework Foundation -framework OpenDirectory -framework Security \
             -lpam -lobjc
         '';
@@ -147,13 +147,13 @@
           echo "Building from directory: $(pwd)"
           echo "Contents:"
           ls -la
-          # Link libmacauth statically so the compositor stays a single dylib.
+          # Link libdoorman statically so the compositor stays a single dylib.
           xcrun clang -arch arm64e -dynamiclib -o libprotein_render.dylib \
             -I"$src" \
-            -I${macauthArm64e}/include \
+            -I${doormanArm64e}/include \
             -I${dobbyArm64e}/include \
             -L${dobbyArm64e}/lib -ldobby \
-            ${macauthArm64e}/lib/libmacauth.a \
+            ${doormanArm64e}/lib/libdoorman.a \
             -framework Foundation -framework IOSurface -framework CoreGraphics -framework QuartzCore \
             -framework Metal -framework CoreServices -framework OpenDirectory -framework Security \
             -lpam -lc++ \
@@ -193,8 +193,8 @@
         default = fxwmArm64e;
         dylib = dylibArm64e;
         dobby = dobbyArm64e;
-        macauth = macauthArm64e;
-        macauth-example = macauthExampleArm64e;
+        doorman = doormanArm64e;
+        doorman-example = doormanExampleArm64e;
       });
 
       apps = forAllSystems (system: let pkgs = pkgsFor.${system}; in {

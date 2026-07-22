@@ -1,7 +1,11 @@
-# libmacauth
+# Doorman (`libdoorman`)
 
 A PAM-inspired **macOS user authentication framework**, extracted from fxwm so
 that any project can sign a user in to macOS through one stable C ABI.
+
+The name says what it does: Doorman checks a user's credentials at the door and
+admits them into a session — the authentication backend a login screen or
+display manager relies on to decide who gets in and to hand them their session.
 
 It exposes the same conceptual flow a Linux login stack uses — start a
 transaction, run a *conversation* to collect credentials, authenticate,
@@ -25,67 +29,67 @@ Credential verification can use any of:
 
 | Backend | Mechanism | Use it when |
 |---------|-----------|-------------|
-| `MACAUTH_BACKEND_AUTO` | OpenDirectory, falling back to dsLocal | default; most robust |
-| `MACAUTH_BACKEND_OPENDIRECTORY` | `ODRecord verifyPassword:` via opendirectoryd | production; supports local + network/mobile accounts |
-| `MACAUTH_BACKEND_DSLOCAL` | Parse `ShadowHashData` `SALTED-SHA512-PBKDF2` directly | restricted/early contexts without opendirectoryd (fxwm's original method) |
-| `MACAUTH_BACKEND_PAM` | Drive macOS's OpenPAM stack (`/etc/pam.d/<service>`) | you want administrator-configurable policy, closest to the Linux method |
+| `DOORMAN_BACKEND_AUTO` | OpenDirectory, falling back to dsLocal | default; most robust |
+| `DOORMAN_BACKEND_OPENDIRECTORY` | `ODRecord verifyPassword:` via opendirectoryd | production; supports local + network/mobile accounts |
+| `DOORMAN_BACKEND_DSLOCAL` | Parse `ShadowHashData` `SALTED-SHA512-PBKDF2` directly | restricted/early contexts without opendirectoryd (fxwm's original method) |
+| `DOORMAN_BACKEND_PAM` | Drive macOS's OpenPAM stack (`/etc/pam.d/<service>`) | you want administrator-configurable policy, closest to the Linux method |
 
 ## API at a glance
 
 ```c
-#include <macauth.h>
+#include <doorman.h>
 
 /* One-shot (directory backends), a drop-in for the old DoLogon(): */
-if (macauth_authenticate_password(user, pass, MACAUTH_BACKEND_AUTO) == MACAUTH_SUCCESS) { ... }
+if (doorman_authenticate_password(user, pass, DOORMAN_BACKEND_AUTO) == DOORMAN_SUCCESS) { ... }
 
 /* Full transaction with a conversation (works with every backend, incl. PAM): */
-macauth_conv_t conv = { my_conv_fn, appdata };
-macauth_handle_t *h;
-macauth_start("login", user, &conv, MACAUTH_BACKEND_PAM, &h);
-macauth_authenticate(h);      /* prompts via my_conv_fn                    */
-macauth_acct_mgmt(h);         /* account allowed to log in?                */
-macauth_setcred(h, MACAUTH_CRED_ESTABLISH);          /* pam_setcred parity     */
+doorman_conv_t conv = { my_conv_fn, appdata };
+doorman_handle_t *h;
+doorman_start("login", user, &conv, DOORMAN_BACKEND_PAM, &h);
+doorman_authenticate(h);      /* prompts via my_conv_fn                    */
+doorman_acct_mgmt(h);         /* account allowed to log in?                */
+doorman_setcred(h, DOORMAN_CRED_ESTABLISH);          /* pam_setcred parity     */
 
 /* Display-manager helpers: */
-macauth_user_t *users; size_t nu;
-macauth_enumerate_users(true, &users, &nu);          /* login-eligible users   */
+doorman_user_t *users; size_t nu;
+doorman_enumerate_users(true, &users, &nu);          /* login-eligible users   */
 
 gid_t *gids; size_t ng;
-macauth_get_groups(user, &gids, &ng);                /* getgrouplist parity    */
+doorman_get_groups(user, &gids, &ng);                /* getgrouplist parity    */
 
-macauth_session_t *sessions; size_t ns;
-macauth_enumerate_sessions(&sessions, &ns);          /* .desktop + aqua        */
+doorman_session_t *sessions; size_t ns;
+doorman_enumerate_sessions(&sessions, &ns);          /* .desktop + aqua        */
 
 pid_t pid;
-macauth_open_session(h, &sessions[i], &pid);         /* fork/setuid/exec       */
+doorman_open_session(h, &sessions[i], &pid);         /* fork/setuid/exec       */
 
-macauth_end(h);
+doorman_end(h);
 ```
 
 The conversation callback mirrors `struct pam_conv` (styles map 1:1 to
 `PAM_PROMPT_ECHO_OFF` etc.), so a Linux PAM conversation function ports almost
-verbatim. Full documentation is in the header, [`include/macauth.h`](include/macauth.h).
+verbatim. Full documentation is in the header, [`include/doorman.h`](include/doorman.h).
 
 ## Building
 
-macauth is exposed as a Nix flake package (arm64e, to match the WindowServer
+doorman is exposed as a Nix flake package (arm64e, to match the WindowServer
 ABI that fxwm injects into):
 
 ```bash
-nix build .#macauth          # static + dylib + header in ./result
-nix build .#macauth-example  # the console demo, ./result/bin/macdm
+nix build .#doorman          # static + dylib + header in ./result
+nix build .#doorman-example  # the console demo, ./result/bin/macdm
 ```
 
 Or compile against it directly on macOS:
 
 ```sh
-cc yourapp.c -I<macauth>/include \
-   <macauth>/lib/libmacauth.a \
+cc yourapp.c -I<doorman>/include \
+   <doorman>/lib/libdoorman.a \
    -framework Foundation -framework OpenDirectory -framework Security \
    -lpam -lobjc
 ```
 
-Produces `libmacauth.a` (for embedding, as fxwm does) and `libmacauth.dylib`
+Produces `libdoorman.a` (for embedding, as fxwm does) and `libdoorman.dylib`
 (for dynamic consumers), plus the installed public header.
 
 ## Example
@@ -101,7 +105,7 @@ display-manager port should consume the framework.
   dsLocal backend compares derived keys in constant time.
 - The directory backends need read access to the local store (run as root) for
   the dsLocal path; OpenDirectory enforces its own access via opendirectoryd.
-- `macauth_open_session` only drops privileges when the caller is root; other-
+- `doorman_open_session` only drops privileges when the caller is root; other-
   wise it can launch a session for the current user (handy for development).
 - This is experimental software that authenticates real macOS accounts. Review
   it before using it anywhere that matters.

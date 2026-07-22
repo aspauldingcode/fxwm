@@ -1,6 +1,6 @@
-# How Linux authenticates users (and how macauth maps it to macOS)
+# How Linux authenticates users (and how doorman maps it to macOS)
 
-This document answers the design question behind `libmacauth`: *how does Linux
+This document answers the design question behind `libdoorman`: *how does Linux
 actually authenticate a user at login, and what is the equivalent on macOS?*
 The library is a port of the Linux model, so understanding the Linux side is
 the specification for the macOS side.
@@ -47,10 +47,10 @@ macOS is structurally identical here: there is no `/etc/shadow`, but the local
 directory stores a per-user `ShadowHashData` blob whose `SALTED-SHA512-PBKDF2`
 entry is exactly a salt + iteration count + derived key. Verifying a password
 is the same "re-derive with PBKDF2-HMAC-SHA512 and compare" operation. That is
-what `macauth`'s `dslocal` backend does, and it is what fxwm implemented inline
+what `doorman`'s `dslocal` backend does, and it is what fxwm implemented inline
 before this refactor.
 
-## PAM in detail (the part macauth ports)
+## PAM in detail (the part doorman ports)
 
 PAM is the piece worth porting because it is the abstraction every Linux login
 program shares. Its value is that the *application* does not know or care how a
@@ -136,32 +136,32 @@ A greeter such as GDM/SDDM/LightDM combines all of the above:
 
 ## Linux → macOS mapping
 
-`libmacauth` reproduces each stage with a native macOS mechanism:
+`libdoorman` reproduces each stage with a native macOS mechanism:
 
-| Linux concept                         | macOS equivalent                                   | macauth surface |
+| Linux concept                         | macOS equivalent                                   | doorman surface |
 |---------------------------------------|----------------------------------------------------|-----------------|
-| `getpwnam` / `getpwent` over NSS      | `getpwnam` / `getpwent` serviced by opendirectoryd | `macauth_enumerate_users`, `macauth_lookup_user` |
+| `getpwnam` / `getpwent` over NSS      | `getpwnam` / `getpwent` serviced by opendirectoryd | `doorman_enumerate_users`, `doorman_lookup_user` |
 | `/etc/passwd`                         | dsLocal user records (`/var/db/dslocal/...`)       | user fields (uid/gid/home/shell/gecos) |
-| `/etc/shadow` + `crypt`               | `ShadowHashData` → `SALTED-SHA512-PBKDF2`          | `MACAUTH_BACKEND_DSLOCAL` |
-| PAM stack (`pam_unix`, `pam_ldap`...) | OpenDirectory (`ODRecord verifyPassword`)          | `MACAUTH_BACKEND_OPENDIRECTORY` |
-| PAM API + `/etc/pam.d`                | OpenPAM (macOS ships it!) + `/etc/pam.d`           | `MACAUTH_BACKEND_PAM` |
-| `struct pam_conv` conversation        | `macauth_conv_t` conversation                      | `macauth_authenticate` |
-| `pam_start`/`authenticate`/`acct_mgmt`| same phases                                        | `macauth_start` / `macauth_authenticate` / `macauth_acct_mgmt` |
-| `.desktop` session discovery          | same `.desktop` discovery + built-in `aqua`        | `macauth_enumerate_sessions` |
-| `pam_open_session` + fork/setuid/exec | fork/setgid/initgroups/setuid/exec                 | `macauth_open_session` |
+| `/etc/shadow` + `crypt`               | `ShadowHashData` → `SALTED-SHA512-PBKDF2`          | `DOORMAN_BACKEND_DSLOCAL` |
+| PAM stack (`pam_unix`, `pam_ldap`...) | OpenDirectory (`ODRecord verifyPassword`)          | `DOORMAN_BACKEND_OPENDIRECTORY` |
+| PAM API + `/etc/pam.d`                | OpenPAM (macOS ships it!) + `/etc/pam.d`           | `DOORMAN_BACKEND_PAM` |
+| `struct pam_conv` conversation        | `doorman_conv_t` conversation                      | `doorman_authenticate` |
+| `pam_start`/`authenticate`/`acct_mgmt`| same phases                                        | `doorman_start` / `doorman_authenticate` / `doorman_acct_mgmt` |
+| `.desktop` session discovery          | same `.desktop` discovery + built-in `aqua`        | `doorman_enumerate_sessions` |
+| `pam_open_session` + fork/setuid/exec | fork/setgid/initgroups/setuid/exec                 | `doorman_open_session` |
 
 Two facts make the port clean rather than an emulation:
 
 - **macOS ships OpenPAM.** `security/pam_appl.h`, `libpam`, and `/etc/pam.d/`
   all exist on macOS. A program written against PAM on Linux can, in principle,
-  keep using PAM on macOS. `macauth`'s PAM backend simply drives that stack.
+  keep using PAM on macOS. `doorman`'s PAM backend simply drives that stack.
 - **macOS password hashing is the same shape as Linux's.** A salted,
   iterated, one-way KDF verified by re-derivation. Only the storage location
   and container format differ, and the `dslocal` backend hides that.
 
 The result: a login program (for example a Wayland display manager being
 ported to macOS) can keep its PAM-style structure and its `.desktop` session
-model, and only swap `libpam`/NSS calls for the equivalent `libmacauth` calls.
+model, and only swap `libpam`/NSS calls for the equivalent `libdoorman` calls.
 
 For the *complete* enumeration of every place the two platforms diverge — and
 exactly which differences the framework bridges versus surfaces — see

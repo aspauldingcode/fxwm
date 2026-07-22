@@ -12,7 +12,7 @@
 #include <pwd.h>
 #include <string.h>
 #include <stdlib.h>
-#include "macauth_internal.h"
+#include "doorman_internal.h"
 
 static const uid_t kMinInteractiveUID = 500;
 
@@ -28,7 +28,7 @@ static bool is_hidden_account(const struct passwd *pw) {
     return false;
 }
 
-static void fill_from_passwd(const struct passwd *pw, macauth_user_t *u) {
+static void fill_from_passwd(const struct passwd *pw, doorman_user_t *u) {
     u->name = pw->pw_name ? strdup(pw->pw_name) : NULL;
     u->full_name = (pw->pw_gecos && pw->pw_gecos[0]) ? strdup(pw->pw_gecos) : NULL;
     u->home = pw->pw_dir ? strdup(pw->pw_dir) : NULL;
@@ -38,16 +38,16 @@ static void fill_from_passwd(const struct passwd *pw, macauth_user_t *u) {
     u->hidden = is_hidden_account(pw);
 }
 
-macauth_result_t macauth_enumerate_users(bool interactive_only,
-                                         macauth_user_t **out,
+doorman_result_t doorman_enumerate_users(bool interactive_only,
+                                         doorman_user_t **out,
                                          size_t *count) {
-    if (!out || !count) return MACAUTH_ERR_INVALID_ARG;
+    if (!out || !count) return DOORMAN_ERR_INVALID_ARG;
     *out = NULL;
     *count = 0;
 
     size_t cap = 16, n = 0;
-    macauth_user_t *arr = calloc(cap, sizeof(*arr));
-    if (!arr) return MACAUTH_ERR_SYSTEM;
+    doorman_user_t *arr = calloc(cap, sizeof(*arr));
+    if (!arr) return DOORMAN_ERR_SYSTEM;
 
     setpwent();
     struct passwd *pw;
@@ -55,8 +55,8 @@ macauth_result_t macauth_enumerate_users(bool interactive_only,
         if (interactive_only && is_hidden_account(pw)) continue;
         if (n == cap) {
             size_t ncap = cap * 2;
-            macauth_user_t *tmp = realloc(arr, ncap * sizeof(*arr));
-            if (!tmp) { endpwent(); macauth_free_users(arr, n); return MACAUTH_ERR_SYSTEM; }
+            doorman_user_t *tmp = realloc(arr, ncap * sizeof(*arr));
+            if (!tmp) { endpwent(); doorman_free_users(arr, n); return DOORMAN_ERR_SYSTEM; }
             arr = tmp;
             cap = ncap;
         }
@@ -67,16 +67,16 @@ macauth_result_t macauth_enumerate_users(bool interactive_only,
 
     *out = arr;
     *count = n;
-    return MACAUTH_SUCCESS;
+    return DOORMAN_SUCCESS;
 }
 
-void macauth_free_users(macauth_user_t *users, size_t count) {
+void doorman_free_users(doorman_user_t *users, size_t count) {
     if (!users) return;
-    for (size_t i = 0; i < count; i++) macauth_free_user_fields(&users[i]);
+    for (size_t i = 0; i < count; i++) doorman_free_user_fields(&users[i]);
     free(users);
 }
 
-void macauth_free_user_fields(macauth_user_t *user) {
+void doorman_free_user_fields(doorman_user_t *user) {
     if (!user) return;
     free(user->name);
     free(user->full_name);
@@ -85,7 +85,7 @@ void macauth_free_user_fields(macauth_user_t *user) {
     memset(user, 0, sizeof(*user));
 }
 
-BOOL _macauth_copy_passwd(const char *name, macauth_user_t *out) {
+BOOL _doorman_copy_passwd(const char *name, doorman_user_t *out) {
     if (!name || !out) return NO;
     struct passwd *pw = getpwnam(name);
     if (!pw) return NO;
@@ -93,9 +93,9 @@ BOOL _macauth_copy_passwd(const char *name, macauth_user_t *out) {
     return YES;
 }
 
-macauth_result_t macauth_lookup_user(const char *name, macauth_user_t *out) {
-    if (!name || !out) return MACAUTH_ERR_INVALID_ARG;
+doorman_result_t doorman_lookup_user(const char *name, doorman_user_t *out) {
+    if (!name || !out) return DOORMAN_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
-    if (!_macauth_copy_passwd(name, out)) return MACAUTH_ERR_USER_UNKNOWN;
-    return MACAUTH_SUCCESS;
+    if (!_doorman_copy_passwd(name, out)) return DOORMAN_ERR_USER_UNKNOWN;
+    return DOORMAN_SUCCESS;
 }

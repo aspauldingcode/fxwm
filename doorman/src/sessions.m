@@ -21,7 +21,7 @@
 #include <string.h>
 #include <spawn.h>
 #include <sys/stat.h>
-#include "macauth_internal.h"
+#include "doorman_internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Minimal .desktop parser                                                   */
@@ -69,9 +69,9 @@ static char *dup_nsstring(NSString *s) {
     return s ? strdup(s.UTF8String) : NULL;
 }
 
-macauth_result_t macauth_enumerate_sessions(macauth_session_t **out,
+doorman_result_t doorman_enumerate_sessions(doorman_session_t **out,
                                             size_t *count) {
-    if (!out || !count) return MACAUTH_ERR_INVALID_ARG;
+    if (!out || !count) return DOORMAN_ERR_INVALID_ARG;
     *out = NULL;
     *count = 0;
 
@@ -120,8 +120,8 @@ macauth_result_t macauth_enumerate_sessions(macauth_session_t **out,
         }];
 
         size_t n = found.count;
-        macauth_session_t *arr = calloc(n, sizeof(*arr));
-        if (!arr) return MACAUTH_ERR_SYSTEM;
+        doorman_session_t *arr = calloc(n, sizeof(*arr));
+        if (!arr) return DOORMAN_ERR_SYSTEM;
 
         for (size_t i = 0; i < n; i++) {
             NSDictionary *e = found[i];
@@ -134,11 +134,11 @@ macauth_result_t macauth_enumerate_sessions(macauth_session_t **out,
 
         *out = arr;
         *count = n;
-        return MACAUTH_SUCCESS;
+        return DOORMAN_SUCCESS;
     }
 }
 
-void macauth_free_sessions(macauth_session_t *sessions, size_t count) {
+void doorman_free_sessions(doorman_session_t *sessions, size_t count) {
     if (!sessions) return;
     for (size_t i = 0; i < count; i++) {
         free(sessions[i].id);
@@ -154,29 +154,29 @@ void macauth_free_sessions(macauth_session_t *sessions, size_t count) {
 /* Session launch                                                            */
 /* ------------------------------------------------------------------------- */
 
-macauth_result_t macauth_open_session(macauth_handle_t *handle,
-                                      const macauth_session_t *session,
+doorman_result_t doorman_open_session(doorman_handle_t *handle,
+                                      const doorman_session_t *session,
                                       pid_t *out_pid) {
-    if (!handle || !session || !session->exec) return MACAUTH_ERR_INVALID_ARG;
-    if (!handle->authenticated) return MACAUTH_ERR_ABORT;
-    if (!handle->user) return MACAUTH_ERR_USER_UNKNOWN;
+    if (!handle || !session || !session->exec) return DOORMAN_ERR_INVALID_ARG;
+    if (!handle->authenticated) return DOORMAN_ERR_ABORT;
+    if (!handle->user) return DOORMAN_ERR_USER_UNKNOWN;
 
-    macauth_user_t u;
-    if (macauth_lookup_user(handle->user, &u) != MACAUTH_SUCCESS)
-        return MACAUTH_ERR_USER_UNKNOWN;
+    doorman_user_t u;
+    if (doorman_lookup_user(handle->user, &u) != DOORMAN_SUCCESS)
+        return DOORMAN_ERR_USER_UNKNOWN;
 
     /* Dropping privileges requires root; without it we can still launch a
      * session for the current user (useful for development/testing). */
     bool amRoot = (geteuid() == 0);
     if (!amRoot && u.uid != getuid()) {
-        macauth_free_user_fields(&u);
-        return MACAUTH_ERR_PERM;
+        doorman_free_user_fields(&u);
+        return DOORMAN_ERR_PERM;
     }
 
     pid_t pid = fork();
     if (pid < 0) {
-        macauth_free_user_fields(&u);
-        return MACAUTH_ERR_SYSTEM;
+        doorman_free_user_fields(&u);
+        return DOORMAN_ERR_SYSTEM;
     }
 
     if (pid == 0) {
@@ -193,7 +193,7 @@ macauth_result_t macauth_open_session(macauth_handle_t *handle,
         if (u.home) chdir(u.home);
 
         char runtimeDir[64];
-        snprintf(runtimeDir, sizeof(runtimeDir), "/private/tmp/macauth-%u", (unsigned)u.uid);
+        snprintf(runtimeDir, sizeof(runtimeDir), "/private/tmp/doorman-%u", (unsigned)u.uid);
         mkdir(runtimeDir, 0700);
 
         /* Start from an empty environment and build a minimal login session. */
@@ -220,14 +220,14 @@ macauth_result_t macauth_open_session(macauth_handle_t *handle,
     handle->session_open = true;
     handle->session_pid = pid;
     if (out_pid) *out_pid = pid;
-    macauth_free_user_fields(&u);
-    return MACAUTH_SUCCESS;
+    doorman_free_user_fields(&u);
+    return DOORMAN_SUCCESS;
 }
 
-macauth_result_t macauth_close_session(macauth_handle_t *handle) {
-    if (!handle) return MACAUTH_ERR_INVALID_ARG;
-    if (!handle->session_open) return MACAUTH_ERR_NO_SESSION;
+doorman_result_t doorman_close_session(doorman_handle_t *handle) {
+    if (!handle) return DOORMAN_ERR_INVALID_ARG;
+    if (!handle->session_open) return DOORMAN_ERR_NO_SESSION;
     handle->session_open = false;
     handle->session_pid = 0;
-    return MACAUTH_SUCCESS;
+    return DOORMAN_SUCCESS;
 }

@@ -7,7 +7,7 @@
  * administrator declared in /etc/pam.d/<service> (pam_opendirectory,
  * pam_unix, smartcard modules, etc.).
  *
- * We bridge macauth's conversation to a struct pam_conv so the same credential
+ * We bridge doorman's conversation to a struct pam_conv so the same credential
  * prompts flow through unchanged.
  */
 
@@ -15,46 +15,46 @@
 #include <security/pam_appl.h>
 #include <stdlib.h>
 #include <string.h>
-#include "macauth_internal.h"
+#include "doorman_internal.h"
 
-/* Translate a PAM message style into a macauth style. */
-static macauth_msg_style_t pam_style_to_macauth(int pam_style) {
+/* Translate a PAM message style into a doorman style. */
+static doorman_msg_style_t pam_style_to_doorman(int pam_style) {
     switch (pam_style) {
-        case PAM_PROMPT_ECHO_OFF: return MACAUTH_PROMPT_ECHO_OFF;
-        case PAM_PROMPT_ECHO_ON:  return MACAUTH_PROMPT_ECHO_ON;
-        case PAM_ERROR_MSG:       return MACAUTH_ERROR_MSG;
+        case PAM_PROMPT_ECHO_OFF: return DOORMAN_PROMPT_ECHO_OFF;
+        case PAM_PROMPT_ECHO_ON:  return DOORMAN_PROMPT_ECHO_ON;
+        case PAM_ERROR_MSG:       return DOORMAN_ERROR_MSG;
         case PAM_TEXT_INFO:
-        default:                  return MACAUTH_TEXT_INFO;
+        default:                  return DOORMAN_TEXT_INFO;
     }
 }
 
 /*
- * PAM conversation shim. appdata_ptr is the macauth_handle_t*. We forward each
- * PAM message to the macauth conversation and copy responses back into
+ * PAM conversation shim. appdata_ptr is the doorman_handle_t*. We forward each
+ * PAM message to the doorman conversation and copy responses back into
  * PAM-allocated storage (PAM frees resp with free()).
  */
 static int pam_conv_shim(int num_msg,
                          const struct pam_message **msg,
                          struct pam_response **resp,
                          void *appdata_ptr) {
-    macauth_handle_t *handle = (macauth_handle_t *)appdata_ptr;
+    doorman_handle_t *handle = (doorman_handle_t *)appdata_ptr;
     if (!handle || !handle->conv.conv || num_msg <= 0) return PAM_CONV_ERR;
 
     struct pam_response *replies = calloc((size_t)num_msg, sizeof(*replies));
     if (!replies) return PAM_BUF_ERR;
 
-    /* Build macauth-shaped messages. */
-    macauth_message_t *mmsgs = calloc((size_t)num_msg, sizeof(*mmsgs));
-    const macauth_message_t **mmsg_ptrs = calloc((size_t)num_msg, sizeof(*mmsg_ptrs));
-    macauth_response_t *mresp = calloc((size_t)num_msg, sizeof(*mresp));
-    macauth_response_t **mresp_ptrs = calloc((size_t)num_msg, sizeof(*mresp_ptrs));
+    /* Build doorman-shaped messages. */
+    doorman_message_t *mmsgs = calloc((size_t)num_msg, sizeof(*mmsgs));
+    const doorman_message_t **mmsg_ptrs = calloc((size_t)num_msg, sizeof(*mmsg_ptrs));
+    doorman_response_t *mresp = calloc((size_t)num_msg, sizeof(*mresp));
+    doorman_response_t **mresp_ptrs = calloc((size_t)num_msg, sizeof(*mresp_ptrs));
     if (!mmsgs || !mmsg_ptrs || !mresp || !mresp_ptrs) {
         free(replies); free(mmsgs); free(mmsg_ptrs); free(mresp); free(mresp_ptrs);
         return PAM_BUF_ERR;
     }
 
     for (int i = 0; i < num_msg; i++) {
-        mmsgs[i].style = pam_style_to_macauth(msg[i]->msg_style);
+        mmsgs[i].style = pam_style_to_doorman(msg[i]->msg_style);
         mmsgs[i].msg = msg[i]->msg;
         mmsg_ptrs[i] = &mmsgs[i];
         mresp_ptrs[i] = &mresp[i];
@@ -69,7 +69,7 @@ static int pam_conv_shim(int num_msg,
         return PAM_CONV_ERR;
     }
 
-    /* Copy macauth responses into PAM-owned storage. */
+    /* Copy doorman responses into PAM-owned storage. */
     for (int i = 0; i < num_msg; i++) {
         if (mresp[i].resp) {
             replies[i].resp = strdup(mresp[i].resp);
@@ -93,28 +93,28 @@ typedef struct {
     struct pam_conv conv;
 } pam_state_t;
 
-static macauth_result_t pam_status_to_macauth(int status) {
+static doorman_result_t pam_status_to_doorman(int status) {
     switch (status) {
-        case PAM_SUCCESS:         return MACAUTH_SUCCESS;
+        case PAM_SUCCESS:         return DOORMAN_SUCCESS;
         case PAM_AUTH_ERR:
         case PAM_CRED_INSUFFICIENT:
-        case PAM_MAXTRIES:        return MACAUTH_ERR_AUTH;
-        case PAM_USER_UNKNOWN:    return MACAUTH_ERR_USER_UNKNOWN;
+        case PAM_MAXTRIES:        return DOORMAN_ERR_AUTH;
+        case PAM_USER_UNKNOWN:    return DOORMAN_ERR_USER_UNKNOWN;
         case PAM_ACCT_EXPIRED:
         case PAM_NEW_AUTHTOK_REQD:
-        case PAM_PERM_DENIED:     return MACAUTH_ERR_ACCT_DISABLED;
-        case PAM_CONV_ERR:        return MACAUTH_ERR_CONV;
-        case PAM_ABORT:           return MACAUTH_ERR_ABORT;
-        default:                  return MACAUTH_ERR_SYSTEM;
+        case PAM_PERM_DENIED:     return DOORMAN_ERR_ACCT_DISABLED;
+        case PAM_CONV_ERR:        return DOORMAN_ERR_CONV;
+        case PAM_ABORT:           return DOORMAN_ERR_ABORT;
+        default:                  return DOORMAN_ERR_SYSTEM;
     }
 }
 
-macauth_result_t _macauth_pam_authenticate(macauth_handle_t *handle) {
-    if (!handle) return MACAUTH_ERR_INVALID_ARG;
-    if (!handle->conv.conv) return MACAUTH_ERR_CONV;
+doorman_result_t _doorman_pam_authenticate(doorman_handle_t *handle) {
+    if (!handle) return DOORMAN_ERR_INVALID_ARG;
+    if (!handle->conv.conv) return DOORMAN_ERR_CONV;
 
     pam_state_t *state = calloc(1, sizeof(*state));
-    if (!state) return MACAUTH_ERR_SYSTEM;
+    if (!state) return DOORMAN_ERR_SYSTEM;
 
     state->conv.conv = pam_conv_shim;
     state->conv.appdata_ptr = handle;
@@ -123,7 +123,7 @@ macauth_result_t _macauth_pam_authenticate(macauth_handle_t *handle) {
     int rc = pam_start(service, handle->user, &state->conv, &state->pamh);
     if (rc != PAM_SUCCESS) {
         free(state);
-        return pam_status_to_macauth(rc);
+        return pam_status_to_doorman(rc);
     }
 
     if (handle->rhost) pam_set_item(state->pamh, PAM_RHOST, handle->rhost);
@@ -145,32 +145,32 @@ macauth_result_t _macauth_pam_authenticate(macauth_handle_t *handle) {
         pam_end(state->pamh, rc);
         free(state);
     }
-    return pam_status_to_macauth(rc);
+    return pam_status_to_doorman(rc);
 }
 
-macauth_result_t _macauth_pam_acct_mgmt(macauth_handle_t *handle) {
-    if (!handle) return MACAUTH_ERR_INVALID_ARG;
+doorman_result_t _doorman_pam_acct_mgmt(doorman_handle_t *handle) {
+    if (!handle) return DOORMAN_ERR_INVALID_ARG;
     pam_state_t *state = (pam_state_t *)handle->backend_state;
-    if (!state || !state->pamh) return MACAUTH_ERR_ABORT;
+    if (!state || !state->pamh) return DOORMAN_ERR_ABORT;
 
     int rc = pam_acct_mgmt(state->pamh, 0);
-    return pam_status_to_macauth(rc);
+    return pam_status_to_doorman(rc);
 }
 
-macauth_result_t _macauth_pam_setcred(macauth_handle_t *handle, int flag) {
-    if (!handle) return MACAUTH_ERR_INVALID_ARG;
+doorman_result_t _doorman_pam_setcred(doorman_handle_t *handle, int flag) {
+    if (!handle) return DOORMAN_ERR_INVALID_ARG;
     pam_state_t *state = (pam_state_t *)handle->backend_state;
-    if (!state || !state->pamh) return MACAUTH_ERR_ABORT;
+    if (!state || !state->pamh) return DOORMAN_ERR_ABORT;
 
     int pam_flag;
     switch (flag) {
-        case MACAUTH_CRED_DELETE:       pam_flag = PAM_DELETE_CRED; break;
-        case MACAUTH_CRED_REINITIALIZE: pam_flag = PAM_REINITIALIZE_CRED; break;
-        case MACAUTH_CRED_REFRESH:      pam_flag = PAM_REFRESH_CRED; break;
-        case MACAUTH_CRED_ESTABLISH:
+        case DOORMAN_CRED_DELETE:       pam_flag = PAM_DELETE_CRED; break;
+        case DOORMAN_CRED_REINITIALIZE: pam_flag = PAM_REINITIALIZE_CRED; break;
+        case DOORMAN_CRED_REFRESH:      pam_flag = PAM_REFRESH_CRED; break;
+        case DOORMAN_CRED_ESTABLISH:
         default:                        pam_flag = PAM_ESTABLISH_CRED; break;
     }
 
     int rc = pam_setcred(state->pamh, pam_flag);
-    return pam_status_to_macauth(rc);
+    return pam_status_to_doorman(rc);
 }
